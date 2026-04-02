@@ -1,7 +1,8 @@
 import os
 import pickle
+import numpy as np
 from pydantic import BaseModel
-from pydantic_extra_types.coordinate import Coordinate
+from sklearn.neighbors import BallTree
 
 import osmnx as ox
 import networkx as nx
@@ -29,10 +30,22 @@ class RouteResponse(BaseModel):
     estimated_time_seconds: float
     path_nodes: list[int]
 
-@app.post("/get_route", response_model=RouteResponse)
-async def get_route(req: RouteRequest):
-    orig_node = ox.distance.nearest_nodes(G, req.store_lon, req.store_lat)
-    dest_node = ox.distance.nearest_nodes(G, req.client_lon, req.client_lat)
+nodes_data = ox.graph_to_gdfs(G, edges=False)
+node_ids = nodes_data.index.tolist()
+coords_radians = np.radians(nodes_data[["y", "x"]].values)
+spatial_tree = BallTree(coords_radians, metric="haversine")
+
+@app.post("/routes/calculate", response_model=RouteResponse)
+async def find_route(req: RouteRequest):
+    query_coords = np.radians([
+        [req.store_lat, req.store_lon],
+        [req.client_lat, req.client_lon]
+    ])
+    
+    # finds the closest nodes to the store and client positions
+    _, indices = spatial_tree.query(query_coords, k=1)
+    orig_node = node_ids[indices[0][0]]
+    dest_node = node_ids[indices[1][0]]
     
     distance, route = nx.bidirectional_dijkstra(G, orig_node, dest_node, weight="length")
 
