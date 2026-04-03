@@ -163,15 +163,17 @@ def set_table_schema(conn):
             DDL = file.read()
         cur.execute(DDL)
 
-
+def populate_enums(conn):
+    with conn.cursor() as cur:
+        with open("database_enums.sql", "r") as file:
+            DML = file.read()
+        cur.execute(DML)
 
 
 def main():
     session = boto3.Session(region_name = REGION)
     ec2_client, rds_client = session.client("ec2"), session.client("rds")
 
-    destroy_rds(rds_client, DB_INSTANCE_ID)
-    return
     default_vpc = get_default_vpc(ec2_client)
     sg = create_dumb_security_group(ec2_client, default_vpc)
     db_string = allocate_rds(rds_client, sg)
@@ -179,6 +181,7 @@ def main():
     endpoint = get_primary_endpoint(rds_client)
     conn = connect(endpoint)
     set_table_schema(conn)
+    populate_enums(conn)
     input("Press enter to remove db")
     destroy_rds(rds_client, DB_INSTANCE_ID)
     destroy_security_group(ec2_client, sg)
