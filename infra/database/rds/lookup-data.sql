@@ -7,16 +7,10 @@ INSERT INTO OrderState (ID_state, name) VALUES
 (6, 'DELIVERED');
 
 INSERT INTO VehicleTypes (ID_vehicle_type, name) VALUES
-(1, 'Sportbike'),
-(2, 'Cruiser'),
-(3, 'Touring'),
-(4, 'Adventure (ADV)'),
-(5, 'Dual-Sport'),
-(6, 'Naked Bike'),
-(7, 'Scooter'),
-(8, 'Cafe Racer'),
-(9, 'Off-Road/Dirt Bike'),
-(10, 'Chopper');
+(1, 'Motorbike'),
+(2, 'Bicycle'),
+(3, 'Scooter'),
+(4, 'Car');
 
 INSERT INTO CuisineTypes (ID_cuisine_type, name) VALUES
 (1, 'Italian'),
