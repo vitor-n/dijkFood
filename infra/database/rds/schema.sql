@@ -4,7 +4,7 @@ CREATE TABLE Users
   name VARCHAR(128) NOT NULL,
   email VARCHAR(128) NOT NULL,
   phone VARCHAR(15) NOT NULL,
-  lat DECIMAL(10, 8) NULL,
+  lat DECIMAL(10, 8) NOT NULL,
   lon DECIMAL(11, 8) NOT NULL,
   PRIMARY KEY (ID_user)
 );
@@ -20,7 +20,7 @@ CREATE TABLE Restaurants
 (
   ID_restaurant INT NOT NULL,
   name VARCHAR(128) NOT NULL,
-  lat DECIMAL(10, 8) NULL,
+  lat DECIMAL(10, 8) NOT NULL,
   lon DECIMAL(11, 8) NOT NULL,
   H3_index INT NOT NULL,
   ID_cuisine_type INT NOT NULL,
