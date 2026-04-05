@@ -12,7 +12,7 @@ cache/
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
-infra/terraform/*.tfvars
+# infra/terraform/*.tfvars
 infra/terraform/*.tfvars.json
 
 # Graph data (large binary)
