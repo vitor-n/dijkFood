@@ -3,6 +3,8 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from pydantic import BaseModel, ConfigDict, Field
 
+from .config import settings
+
 class Base(DeclarativeBase):
     pass
 
@@ -61,12 +63,19 @@ class RestaurantSchema(BaseModel):
     h3_index: int = Field(alias="H3_index")
     id_cuisine_type: int = Field(alias="ID_cuisine_type")
 
-class CourierSchema(BaseModel):
+class CourierGeneralSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     id_courier: int | None = None
     name: str
     id_vehicle_type: int = Field(alias="ID_vehicle_type")
 
-DATABASE_URL = "postgresql+asyncpg://admin_user_prod:Ihateavroformat69@food-database.c7iyym0ymr45.us-east-1.rds.amazonaws.com:5432/production"
-engine = create_async_engine(DATABASE_URL, echo=True)
+class CourierCreationSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    id_courier: int | None = None
+    name: str
+    lat: float
+    lon: float
+    id_vehicle_type: int = Field(alias="ID_vehicle_type")
+
+engine = create_async_engine(settings.POSTGRES_ENDPOINT, echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
