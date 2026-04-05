@@ -30,7 +30,7 @@ async def update_position(
 ):
     try:
         repo.update_location(data)
-    except e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return { "message": "position captured" }
 
