@@ -8,7 +8,7 @@ import h3
 import boto3
 from fastapi import FastAPI, Depends, HTTPException, status
 
-from .schemas import CourierPositionUpdate, NearbyCourierRequest
+from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest
 from .config import settings
 from .repository import CourierRepository
 
@@ -33,6 +33,18 @@ async def update_position(
     except e:
         raise HTTPException(status_code=500, detail=str(e))
     return { "message": "position captured" }
+
+@app.patch("/tracking/{ID_courier}")
+async def update_status(
+    ID_courier: int,
+    status: CourierStatus,
+    repo: CourierRepository = Depends(get_courier_repo)
+):
+    try:
+        repo.update_status(ID_courier, status)
+    except e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return { "message": "status captured" }
 
 @app.get("/tracking/nearby")
 async def find_nearby_courier(
