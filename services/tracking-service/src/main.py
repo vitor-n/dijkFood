@@ -2,6 +2,7 @@ import time
 from enum import Enum
 from typing import List, Dict
 from pydantic import BaseModel
+from functools import lru_cache
 
 import h3
 import boto3
@@ -13,6 +14,7 @@ from .repository import CourierRepository
 
 app = FastAPI(title="DijkFood Tracking Service")
 
+@lru_cache()
 def get_courier_repo():
     db = boto3.resource(
         "dynamodb",
