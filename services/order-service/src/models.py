@@ -29,3 +29,12 @@ class OrderCreationRequest(BaseModel):
 
 class OrderCreationResponse(BaseModel):
     id_order: int
+
+class OrderUpdateRequest(BaseModel):
+    id_order: int
+    id_state: int
+    #TODO: add items: list[int]
+
+class OrderUpdateResponse(BaseModel):
+    id_order: int
+    id_state: int
