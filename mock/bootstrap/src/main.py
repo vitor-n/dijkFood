@@ -131,7 +131,9 @@ async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int 
         "lat":   loc["lat"],
         "lon":   loc["lon"],
     }, sem)
-    return body.get("id") if body is not None else None
+    if body is None:
+        return None
+    return body.get("id_user") or body.get("id")
 
 
 async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int | None:
@@ -143,7 +145,9 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore) -
         "H3_index":       random.randint(1, 1000),
         "ID_cuisine_type": random.choice(CUISINE_TYPE_IDS),
     }, sem)
-    return body.get("id") if body is not None else None
+    if body is None:
+        return None
+    return body.get("id_restaurant") or body.get("id")
 
 
 # async def create_menu_item(
@@ -167,7 +171,9 @@ async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> i
         # "lat":             loc["lat"],
         # "lon":             loc["lon"],
     }, sem)
-    return body.get("id") if body is not None else None
+    if body is None:
+        return None
+    return body.get("id_courier") or body.get("id")
 
 # ---------------------------------------------------------------------------
 # Ingestão em lote com progresso
