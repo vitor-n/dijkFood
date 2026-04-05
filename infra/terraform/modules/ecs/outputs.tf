@@ -15,9 +15,9 @@ output "routing_service_name" {
 }
 
 output "execution_role_arn" {
-  value = aws_iam_role.execution.arn
+  value = var.execution_role_arn
 }
 
 output "task_role_arn" {
-  value = aws_iam_role.task.arn
+  value = var.task_role_arn
 }
