@@ -67,6 +67,6 @@ class CourierSchema(BaseModel):
     name: str
     id_vehicle_type: int = Field(alias="ID_vehicle_type")
 
-DATABASE_URL = "postgresql+asyncpg://admin_user_prod:chocolate123@food-database.copaph4x2p6v.us-east-1.rds.amazonaws.com:5432/production"
+DATABASE_URL = "postgresql+asyncpg://admin_user_prod:Ihateavroformat69@food-database.c7iyym0ymr45.us-east-1.rds.amazonaws.com:5432/production"
 engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
