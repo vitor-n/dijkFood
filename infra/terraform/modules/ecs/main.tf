@@ -31,76 +31,11 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 #  IAM — Execution Role (pull images, push logs)
 # ──────────────────────────────────────────────
 
-resource "aws_iam_role" "execution" {
-  name = "${var.project_name}-ecs-execution"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Action    = "sts:AssumeRole"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "execution" {
-  role       = aws_iam_role.execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
 
 # ──────────────────────────────────────────────
 #  IAM — Task Role (S3, DynamoDB access at runtime)
 # ──────────────────────────────────────────────
 
-resource "aws_iam_role" "task" {
-  name = "${var.project_name}-ecs-task"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Action    = "sts:AssumeRole"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "task" {
-  name = "${var.project_name}-task-policy"
-  role = aws_iam_role.task.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "DynamoDB"
-        Effect = "Allow"
-        Action = [
-          "dynamodb:PutItem",
-          "dynamodb:GetItem",
-          "dynamodb:Query",
-          "dynamodb:BatchWriteItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem"
-        ]
-        Resource = [
-          var.dynamodb_table_arn,
-          "${var.dynamodb_table_arn}/index/*"
-        ]
-      },
-      {
-        Sid    = "S3Graph"
-        Effect = "Allow"
-        Action = ["s3:GetObject", "s3:ListBucket"]
-        Resource = [
-          var.graph_bucket_arn,
-          "${var.graph_bucket_arn}/*"
-        ]
-      }
-    ]
-  })
-}
 
 # ──────────────────────────────────────────────
 #  CloudWatch Log Groups
@@ -126,8 +61,8 @@ resource "aws_ecs_task_definition" "core_api" {
   network_mode             = "awsvpc"
   cpu                      = var.core_api_cpu
   memory                   = var.core_api_memory
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = var.execution_role_arn 
+  task_role_arn            = var.task_role_arn
 
   container_definitions = jsonencode([{
     name  = "core-api"
@@ -168,8 +103,8 @@ resource "aws_ecs_task_definition" "routing" {
   network_mode             = "awsvpc"
   cpu                      = var.routing_cpu
   memory                   = var.routing_memory
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = var.task_role_arn
+  task_role_arn            = var.task_role_arn
 
   container_definitions = jsonencode([{
     name  = "routing-service"

@@ -122,3 +122,13 @@ variable "routing_max" {
   type    = number
   default = 6
 }
+
+variable "execution_role_arn" {
+  description = "Existing IAM role ARN for ECS task execution"
+  type        = string
+}
+
+variable "task_role_arn" {
+  description = "Existing IAM role ARN for ECS application task"
+  type        = string
+}
