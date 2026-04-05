@@ -1,0 +1,127 @@
+variable "aws_region" {
+  description = "AWS region for all resources"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "environment" {
+  description = "Deployment environment"
+  type        = string
+  default     = "production"
+}
+
+variable "project_name" {
+  description = "Project name used as resource prefix"
+  type        = string
+  default     = "dijkfood"
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "availability_zones" {
+  description = "AZs for multi-AZ deployment"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+}
+
+# ---------- Database ----------
+
+variable "db_username" {
+  description = "RDS PostgreSQL master username"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_password" {
+  description = "RDS PostgreSQL master password"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "db_multi_az" {
+  description = "Enable Multi-AZ for RDS"
+  type        = bool
+  default     = true
+}
+
+# ---------- ECS ----------
+
+variable "core_api_cpu" {
+  description = "CPU units for core-api task (1024 = 1 vCPU)"
+  type        = number
+  default     = 512
+}
+
+variable "core_api_memory" {
+  description = "Memory (MiB) for core-api task"
+  type        = number
+  default     = 1024
+}
+
+variable "core_api_desired" {
+  description = "Desired task count for core-api"
+  type        = number
+  default     = 2
+}
+
+variable "core_api_min" {
+  description = "Min task count for core-api auto-scaling"
+  type        = number
+  default     = 2
+}
+
+variable "core_api_max" {
+  description = "Max task count for core-api auto-scaling"
+  type        = number
+  default     = 10
+}
+
+variable "routing_cpu" {
+  description = "CPU units for routing-service task"
+  type        = number
+  default     = 1024
+}
+
+variable "routing_memory" {
+  description = "Memory (MiB) for routing-service task"
+  type        = number
+  default     = 2048
+}
+
+variable "routing_desired" {
+  description = "Desired task count for routing-service"
+  type        = number
+  default     = 2
+}
+
+variable "routing_min" {
+  description = "Min task count for routing-service auto-scaling"
+  type        = number
+  default     = 1
+}
+
+variable "routing_max" {
+  description = "Max task count for routing-service auto-scaling"
+  type        = number
+  default     = 6
+}
+
+variable "execution_role_arn" {
+  description = "Existing IAM execution role ARN for ECS tasks"
+  type        = string
+}
+
+variable "task_role_arn" {
+  description = "Existing IAM task role ARN for ECS tasks"
+  type        = string
+}

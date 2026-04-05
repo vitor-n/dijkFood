@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+.env
+__pycache__
+*.pyc
+*.pyo
+cache/
+*.tfstate
+*.tfstate.backup
+.terraform/
+*.md
+deploy.py
+relational_db/

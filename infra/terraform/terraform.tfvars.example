@@ -1,0 +1,20 @@
+aws_region         = "us-east-1"
+environment        = "production"
+project_name       = "dijkfood"
+
+db_username        = "dijkfood_admin"
+db_password        = "CHANGE_ME_TO_A_SECURE_PASSWORD"
+db_instance_class  = "db.t3.micro"
+db_multi_az        = true
+
+core_api_cpu       = 512
+core_api_memory    = 1024
+core_api_desired   = 2
+core_api_min       = 2
+core_api_max       = 10
+
+routing_cpu        = 1024
+routing_memory     = 2048
+routing_desired    = 2
+routing_min        = 1
+routing_max        = 6

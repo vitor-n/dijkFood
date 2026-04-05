@@ -1,27 +1,48 @@
-import h3
 import time
 from decimal import Decimal
-
 from typing import List, Dict
+
+import h3
+import botocore
+
 from .utils import generate_cell_index
-from .schemas import CourierPositionUpdate
+from .schemas import CourierStatus, CourierPositionUpdate
 
 class CourierRepository:
     def __init__(self, table):
         self.table = table
 
+    def update_status(self, ID_courier: int, status: CourierStatus):
+        self.table.update_item(
+            Key={
+                "ID_courier": ID_courier,
+            },
+            UpdateExpression="SET #s = :new_status, updated_at = :now",
+            ExpressionAttributeNames={
+                "#s": "status"
+            },
+            ExpressionAttributeValues={
+                ":new_status": status,
+                ":now": int(time.time()*1000)
+            },
+            ConditionExpression="attribute_exists(ID_courier)"
+        )
+
     def update_location(self, data: CourierPositionUpdate):
         cell_index = generate_cell_index(data.lat, data.lon)
 
-        self.table.put_item(
-            Item={
-                "ID_courier": data.ID_courier,
-                "cell_index": cell_index,
-                "lat":        Decimal(str(data.lat)),
-                "lon":        Decimal(str(data.lon)),
-                "status":     data.status.value,
-                "updated_at": int(time.time()*1000)
-            }
+        self.table.update_item(
+            Key={"ID_courier": data.ID_courier},
+            UpdateExpression="SET cell_index = :c, lat = :la, lon = :lo, #s = :st, updated_at = :u",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":c":  cell_index,
+                ":la": Decimal(str(data.lat)),
+                ":lo": Decimal(str(data.lon)),
+                ":st": data.status.value,
+                ":u":  int(time.time()*1000)
+            },
+            ConditionExpression="attribute_exists(ID_courier)"
         )
 
     def get_nearby(self, lat: float, lon: float) -> List[Dict]:
@@ -31,14 +52,14 @@ class CourierRepository:
         couriers = []
 
         response = self.table.query(
-            IndexName="CellIndexIndex",
+            IndexName="CellIndex",
             KeyConditionExpression="cell_index = :ci",
             FilterExpression="#s = :avail",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":ci": center_cell,
-                ":avail": "AVAILABLE"
+                ":avail": CourierStatus.AVAILABLE
             }
         )
 
-        print(response)
+        return response
