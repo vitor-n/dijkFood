@@ -1,6 +1,6 @@
 CREATE TABLE Users
 (
-  ID_user INT NOT NULL,
+  ID_user SERIAL NOT NULL,
   name VARCHAR(128) NOT NULL,
   email VARCHAR(128) NOT NULL,
   phone VARCHAR(15) NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE CuisineTypes
 
 CREATE TABLE Restaurants
 (
-  ID_restaurant INT NOT NULL,
+  ID_restaurant SERIAL NOT NULL,
   name VARCHAR(128) NOT NULL,
   lat DECIMAL(10, 8) NOT NULL,
   lon DECIMAL(11, 8) NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE VehicleTypes
 
 CREATE TABLE Courier
 (
-  ID_courier INT NOT NULL,
+  ID_courier SERIAL NOT NULL,
   name VARCHAR(128) NOT NULL,
   ID_vehicle_type INT NOT NULL,
   PRIMARY KEY (ID_courier),
@@ -53,7 +53,7 @@ CREATE TABLE OrderState
 
 CREATE TABLE Orders
 (
-  ID_order INT NOT NULL,
+  ID_order SERIAL NOT NULL,
   created_at TIMESTAMP NOT NULL,
   ID_restaurant INT NOT NULL,
   ID_user INT NOT NULL,
