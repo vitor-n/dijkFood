@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dijkfood
+      POSTGRES_USER: dijkfood_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdev123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/rds/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ../database/rds/lookup-data.sql:/docker-entrypoint-initdb.d/02-lookup-data.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dijkfood_admin -d dijkfood"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dijkfood
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data/"
+    ports:
+      - "8002:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
+    networks:
+      - dijkfood
+
+  core-api:
+    build:
+      context: ../../
+      dockerfile: infra/docker/core-api.Dockerfile
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://dijkfood_admin:${DB_PASSWORD:-localdev123}@postgres:5432/dijkfood"
+      DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
+      DYNAMODB_TABLE_POSITIONS: "dijkfood-courier-positions"
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dijkfood
+
+  routing-service:
+    build:
+      context: ../../
+      dockerfile: infra/docker/routing-service.Dockerfile
+    environment:
+      GRAPH_PATH: /data/sao_paulo.pkl
+    ports:
+      - "8001:8001"
+    volumes:
+      - ${GRAPH_DATA_PATH:-./data}:/data:ro
+    networks:
+      - dijkfood
+
+volumes:
+  postgres_data:
+  dynamodb_data:
+
+networks:
+  dijkfood:
+    driver: bridge

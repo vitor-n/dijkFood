@@ -1,5 +1,22 @@
 __pycache__/
+*.pyc
+*.pyo
 cache/
 
 .venv
 .env
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+
+# Graph data (large binary)
+data/
+*.pkl
+
+# OS
+.DS_Store
+Thumbs.db

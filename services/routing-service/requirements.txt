@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+numpy
+scikit-learn
+osmnx
+networkx
+boto3
