@@ -1,15 +1,21 @@
+import os
 import boto3
-from botocore.exceptions import ClientError
 import psycopg2
-
 import time
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
 
+load_dotenv()
+
+# Configuration
 REGION         = "us-east-1"
 DB_INSTANCE_ID = "food-database"
 #DB_REPLICA_ID  = "rds-demo-replica"
 DB_NAME        = "production"
-DB_ADMIN_USER  = "admin_user_prod"
-DB_PASSWORD    = "Ihateavroformat69"   # use Secrets Manager in production
+DB_ADMIN_USER  = os.getenv("DB_ADMIN_USER")  # use Secrets Manager in production
+DB_PASSWORD    = os.getenv("DB_PASSWORD")   # use Secrets Manager in production
+if not DB_ADMIN_USER or not DB_PASSWORD:
+    raise ValueError("Missing required environment variables: DB_ADMIN_USER and/or DB_PASSWORD")
 DB_IAM_USER    = "demo_iam"         # created during populate; used in experiment A
 DB_PORT        = 5432
 INSTANCE_CLASS = "db.t3.micro"
@@ -114,11 +120,11 @@ def destroy_rds(rds_client, db_id):
         waiter = rds_client.get_waiter("db_instance_deleted")
         waiter.wait(DBInstanceIdentifier=db_id,
                WaiterConfig={"Delay": 30, "MaxAttempts": 40})
-        print(f"[RDS] {"primary".capitalize()} deleted.")
+        print(f"[RDS] {'primary'.capitalize()} deleted.")
     except ClientError as exc:
         code = exc.response["Error"]["Code"]
         if code in ("DBInstanceNotFound", "InvalidDBInstanceState"):
-            print(f"[RDS] {"primary".capitalize()} not found or already deleted.")
+            print(f"[RDS] {'primary'.capitalize()} not found or already deleted.")
         else:
             raise
 
@@ -158,15 +164,17 @@ def connect(endpoint, user=DB_ADMIN_USER, password=DB_PASSWORD,
     return None
 
 def set_table_schema(conn):
+    schema_dir = "infra\\database\\rds\\schema.sql"
     with conn.cursor() as cur:
-        with open("schema.sql", "r") as file:
+        with open(schema_dir, "r") as file:
             DDL = file.read()
         cur.execute(DDL)
     conn.commit()
 
 def insert_lookup_data(conn):
+    lookup_data_dir = "infra\\database\\rds\\lookup-data.sql"
     with conn.cursor() as cur:
-        with open("lookup-data.sql", "r") as file:
+        with open(lookup_data_dir, "r") as file:
             DML = file.read()
         cur.execute(DML)
     conn.commit()

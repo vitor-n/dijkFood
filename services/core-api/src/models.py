@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Numeric, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 class Base(DeclarativeBase):
     pass
@@ -33,14 +33,14 @@ class Restaurant(Base):
     name = Column(String(128), nullable=False)
     lat = Column(Numeric(10, 8), nullable=False)
     lon = Column(Numeric(11, 8), nullable=False)
-    H3_index = Column("h3_index", Integer, nullable=False)
-    ID_cuisine_type = Column("id_cuisine_type", Integer, ForeignKey("cuisinetypes.id_cuisine_type"), nullable=False)
+    h3_index = Column("h3_index", Integer, nullable=False)
+    id_cuisine_type = Column("id_cuisine_type", Integer, ForeignKey("cuisinetypes.id_cuisine_type"), nullable=False)
 
 class Courier(Base):
     __tablename__ = "courier"
     id_courier = Column("id_courier", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
-    ID_vehicle_type = Column("id_vehicle_type", Integer, ForeignKey("vehicletypes.id_vehicle_type"), nullable=False)
+    id_vehicle_type = Column("id_vehicle_type", Integer, ForeignKey("vehicletypes.id_vehicle_type"), nullable=False)
 
 #Classes que determinam o tipo de dados que a API vai receber pra essas entidades
 class UserSchema(BaseModel):
@@ -53,21 +53,20 @@ class UserSchema(BaseModel):
     lon: float
 
 class RestaurantSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     id_restaurant: int | None = None
     name: str
     lat: float
     lon: float
-    H3_index: int
-    ID_cuisine_type: int
+    h3_index: int = Field(alias="H3_index")
+    id_cuisine_type: int = Field(alias="ID_cuisine_type")
 
 class CourierSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     id_courier: int | None = None
     name: str
-    ID_vehicle_type: int
+    id_vehicle_type: int = Field(alias="ID_vehicle_type")
 
-
-DATABASE_URL = "postgresql+asyncpg://admin_user_prod:Ihateavroformat69@food-database.c7iyym0ymr45.us-east-1.rds.amazonaws.com:5432/production"
+DATABASE_URL = "postgresql+asyncpg://admin_user_prod:chocolate123@food-database.copaph4x2p6v.us-east-1.rds.amazonaws.com:5432/production"
 engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
