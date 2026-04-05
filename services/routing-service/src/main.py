@@ -20,14 +20,11 @@ with open(GRAPH_PATH, "rb") as f:
     G = pickle.load(f)
 
 class RouteRequest(BaseModel):
-    store_lat: float
-    store_lon: float
+    orig_lat: float
+    orig_lon: float
     
-    client_lat: float
-    client_lon: float
-
-    # courier_lat: float
-    # courier_lon: float
+    dest_lat: float
+    dest_lon: float
 
 class RouteResponse(BaseModel):
     distance_meters: float
@@ -42,11 +39,11 @@ spatial_tree = BallTree(coords_radians, metric="haversine")
 @app.post("/routes/calculate", response_model=RouteResponse)
 async def find_route(req: RouteRequest):
     query_coords = np.radians([
-        [req.store_lat, req.store_lon],
-        [req.client_lat, req.client_lon]
+        [req.orig_lat, req.orig_lon],
+        [req.dest_lat, req.dest_lon]
     ])
     
-    # finds the closest nodes to the store and client positions
+    # finds the closest map nodes to the origin and destiny positions
     _, indices = spatial_tree.query(query_coords, k=1)
     orig_node = node_ids[indices[0][0]]
     dest_node = node_ids[indices[1][0]]

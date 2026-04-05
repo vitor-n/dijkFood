@@ -68,7 +68,7 @@ CREATE TABLE Orders
 
 CREATE TABLE OrderEvents
 (
-  ID_event INT NOT NULL,
+  ID_event SERIAL NOT NULL,
   changed_at TIMESTAMP NOT NULL,
   ID_order INT NOT NULL,
   ID_state INT NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE OrderEvents
 
 CREATE TABLE Items
 (
-  ID_item INT NOT NULL,
+  ID_item SERIAL NOT NULL,
   name VARCHAR(128) NOT NULL,
   ID_restaurant INT NOT NULL,
   PRIMARY KEY (ID_item),
@@ -88,7 +88,7 @@ CREATE TABLE Items
 
 CREATE TABLE OrderItems
 (
-  ID_order_item INT NOT NULL,
+  ID_order_item SERIAL NOT NULL,
   price DECIMAL(100, 2) NOT NULL,
   ID_item INT NOT NULL,
   ID_order INT NOT NULL,
