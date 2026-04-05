@@ -1,8 +1,18 @@
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, DateTime
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+
+class Restaurant(Base):
+    __tablename__ = "restaurants"
+    
+    ID_restaurant = Column("id_restaurant", Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False)
+    lat = Column(Numeric(10, 8), nullable=False)
+    lon = Column(Numeric(11, 8), nullable=False)
+    H3_index = Column("h3_index", Integer, nullable=False)
+    ID_cuisine_type = Column("id_cuisine_type", Integer, nullable=False)
 
 class Order(Base):
     __tablename__ = "orders"
@@ -29,6 +39,7 @@ class OrderCreationRequest(BaseModel):
 
 class OrderCreationResponse(BaseModel):
     id_order: int
+    id_courier: int
 
 class OrderUpdateRequest(BaseModel):
     id_order: int
