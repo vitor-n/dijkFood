@@ -11,11 +11,6 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
-deployment_circuit_breaker {
-  enable   = true
-  rollback = true
-}
-
 resource "aws_ecs_cluster_capacity_providers" "main" {
   cluster_name       = aws_ecs_cluster.main.name
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
@@ -222,6 +217,11 @@ resource "aws_ecs_service" "core_api" {
   launch_type     = "FARGATE"
   enable_execute_command = true
 
+  deployment_circuit_breaker {
+  enable   = true
+  rollback = true
+  }
+
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [var.ecs_security_group_id]
@@ -239,6 +239,7 @@ resource "aws_ecs_service" "core_api" {
   health_check_grace_period_seconds  = 60
 
   lifecycle { ignore_changes = [desired_count, task_definition] }
+ 
 }
 
 resource "aws_ecs_service" "routing" {
@@ -248,6 +249,11 @@ resource "aws_ecs_service" "routing" {
   desired_count   = var.routing_desired
   launch_type     = "FARGATE"
   enable_execute_command = true
+
+  deployment_circuit_breaker {
+  enable   = true
+  rollback = true
+  }
 
   network_configuration {
     subnets          = var.private_subnet_ids
