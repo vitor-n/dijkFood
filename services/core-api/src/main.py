@@ -18,6 +18,7 @@ app.include_router(crud_router(
     model = User,
     create_schema = UserSchema,
     update_schema = UserSchema,
+    select_schema = UserSchema,
     path = "/users",
     tags = ["Users"]
 ))
@@ -27,6 +28,7 @@ app.include_router(crud_router(
     model = Restaurant,
     create_schema = RestaurantSchema,
     update_schema = RestaurantSchema,
+    select_schema = RestaurantSchema,
     path = "/restaurants",
     tags = ["Restaurants"]
 ))
@@ -36,6 +38,7 @@ app.include_router(crud_router(
     model = Courier,
     create_schema = CourierSchema,
     update_schema = CourierSchema,
+    select_schema = CourierSchema,
     path = "/couriers",
     tags = ["Couriers"]
 ))

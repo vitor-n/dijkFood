@@ -20,7 +20,7 @@ class VehicleType(Base):
 #Tabelas que o servico muda 
 class User(Base):
     __tablename__ = "users"
-    id = Column("id_user", Integer, primary_key=True)
+    id_user = Column("id_user", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
     email = Column(String(128), nullable=False)
     phone = Column(String(15), nullable=False)
@@ -29,7 +29,7 @@ class User(Base):
 
 class Restaurant(Base):
     __tablename__ = "restaurants"
-    id = Column("id_restaurant", Integer, primary_key=True)
+    id_restaurant = Column("id_restaurant", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
     lat = Column(Numeric(10, 8), nullable=False)
     lon = Column(Numeric(11, 8), nullable=False)
@@ -38,14 +38,14 @@ class Restaurant(Base):
 
 class Courier(Base):
     __tablename__ = "courier"
-    id = Column("id_courier", Integer, primary_key=True)
+    id_courier = Column("id_courier", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
     ID_vehicle_type = Column("id_vehicle_type", Integer, ForeignKey("vehicletypes.id_vehicle_type"), nullable=False)
 
 #Classes que determinam o tipo de dados que a API vai receber pra essas entidades
 class UserSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int | None = None
+    id_user: int | None = None
     name: str
     email: str
     phone: str
@@ -54,7 +54,7 @@ class UserSchema(BaseModel):
 
 class RestaurantSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int | None = None
+    id_restaurant: int | None = None
     name: str
     lat: float
     lon: float
@@ -63,7 +63,7 @@ class RestaurantSchema(BaseModel):
 
 class CourierSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int | None = None
+    id_courier: int | None = None
     name: str
     ID_vehicle_type: int
 
