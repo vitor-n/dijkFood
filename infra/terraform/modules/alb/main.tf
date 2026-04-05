@@ -34,7 +34,7 @@ resource "aws_lb_target_group" "core_api" {
 
   health_check {
     enabled             = true
-    path                = "/docs"
+    path                = "/healthz"
     port                = "traffic-port"
     protocol            = "HTTP"
     healthy_threshold   = 2
@@ -57,7 +57,7 @@ resource "aws_lb_target_group" "routing" {
 
   health_check {
     enabled             = true
-    path                = "/docs"
+    path                = "/healthz"
     port                = "traffic-port"
     protocol            = "HTTP"
     healthy_threshold   = 2

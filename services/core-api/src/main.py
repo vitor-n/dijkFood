@@ -8,6 +8,10 @@ from .models import (User, UserSchema,
 #Aplicativo FastAPI
 app = FastAPI()
 
+@app.get("/healthz", tags=["ops"])
+async def healthz():
+    return {"status": "ok"}
+
 async def get_session():
     async with async_session() as session:
         yield session

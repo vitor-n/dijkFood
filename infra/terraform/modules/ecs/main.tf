@@ -11,6 +11,11 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
+deployment_circuit_breaker {
+  enable   = true
+  rollback = true
+}
+
 resource "aws_ecs_cluster_capacity_providers" "main" {
   cluster_name       = aws_ecs_cluster.main.name
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
@@ -151,7 +156,7 @@ resource "aws_ecs_task_definition" "core_api" {
     }
 
     healthCheck = {
-      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\" || exit 1"]
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\" || exit 1"]
       interval    = 30
       timeout     = 5
       retries     = 3
@@ -194,7 +199,7 @@ resource "aws_ecs_task_definition" "routing" {
     }
 
     healthCheck = {
-      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/docs')\" || exit 1"]
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')\" || exit 1"]
       interval    = 30
       timeout     = 10
       retries     = 3
@@ -215,6 +220,7 @@ resource "aws_ecs_service" "core_api" {
   task_definition = aws_ecs_task_definition.core_api.arn
   desired_count   = var.core_api_desired
   launch_type     = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -241,6 +247,7 @@ resource "aws_ecs_service" "routing" {
   task_definition = aws_ecs_task_definition.routing.arn
   desired_count   = var.routing_desired
   launch_type     = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = var.private_subnet_ids

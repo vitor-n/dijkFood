@@ -10,6 +10,10 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI(title="DjiFood Routing Service")
 
+@app.get("/healthz", tags=["ops"])
+async def healthz():
+    return {"status": "ok"}
+
 GRAPH_PATH = os.getenv("GRAPH_PATH", "data/sao_paulo.pkl")
 
 with open(GRAPH_PATH, "rb") as f:

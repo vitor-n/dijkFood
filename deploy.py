@@ -31,6 +31,26 @@ TERRAFORM_DIR = os.path.join("infra", "terraform")
 DOCKER_DIR = os.path.join("infra", "docker")
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
+import urllib.request
+import urllib.error
+
+def stage_smoke_test(outputs: dict):
+    print("\n═══ Smoke test ═══")
+    alb_dns = outputs["alb_dns_name"]["value"]
+
+    urls = [
+        f"http://{alb_dns}/healthz",
+        f"http://{alb_dns}/docs",
+        f"http://{alb_dns}/routes/healthz",
+    ]
+
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=20) as resp:
+                print(f"  ✓ {url} -> {resp.status}")
+        except Exception as exc:
+            raise RuntimeError(f"Smoke test failed for {url}: {exc}")
+
 
 # ─── helpers ────────────────────────────────────────────────────────
 
@@ -55,25 +75,40 @@ def tf_output() -> dict:
     return json.loads(result.stdout)
 
 
+# def ecr_login(region: str, registry_url: str):
+#     """Authenticate Docker with ECR."""
+#     registry_host = registry_url.split("/")[0]
+#     if platform.system() == "Windows":
+#         cmd = (
+#             f'aws ecr get-login-password --region {region} '
+#             f'| docker login --username AWS --password-stdin {registry_host}'
+#         )
+#         run(cmd, shell=True)
+#     else:
+#         token = run(
+#             ["aws", "ecr", "get-login-password", "--region", region],
+#             capture=True,
+#         ).stdout.strip()
+#         run(["docker", "login", "--username", "AWS",
+#              "--password-stdin", registry_host],
+#             shell=False,
+#             check=True,
+#             capture=False)
+
 def ecr_login(region: str, registry_url: str):
-    """Authenticate Docker with ECR."""
     registry_host = registry_url.split("/")[0]
-    if platform.system() == "Windows":
-        cmd = (
-            f'aws ecr get-login-password --region {region} '
-            f'| docker login --username AWS --password-stdin {registry_host}'
-        )
-        run(cmd, shell=True)
-    else:
-        token = run(
-            ["aws", "ecr", "get-login-password", "--region", region],
-            capture=True,
-        ).stdout.strip()
-        run(["docker", "login", "--username", "AWS",
-             "--password-stdin", registry_host],
-            shell=False,
-            check=True,
-            capture=False)
+
+    token = run(
+        ["aws", "ecr", "get-login-password", "--region", region],
+        capture=True,
+    ).stdout.strip()
+
+    subprocess.run(
+        ["docker", "login", "--username", "AWS", "--password-stdin", registry_host],
+        input=token,
+        text=True,
+        check=True
+    )
 
 
 # ─── stages ─────────────────────────────────────────────────────────
@@ -117,7 +152,11 @@ def stage_build_push(outputs: dict):
 
 def stage_upload_graph(outputs: dict):
     print("\n═══ Stage 4/6: Upload graph to S3 ═══")
-    graph_path = os.environ.get("GRAPH_FILE_PATH", "data/sao_paulo.pkl")
+    # graph_path = os.environ.get("GRAPH_FILE_PATH", "data/sao_paulo.pkl")
+    graph_path = os.environ.get(
+    "GRAPH_FILE_PATH",
+    os.path.join(PROJECT_ROOT, "services", "routing-service", "data", "sao_paulo.pkl")
+    )
     if not os.path.exists(graph_path):
         print(f"  [SKIP] Graph file not found at {graph_path}")
         return
@@ -147,8 +186,10 @@ def stage_init_database(outputs: dict, db_user: str, db_pass: str):
             print(f"  Attempt {attempt}/{retries}: {exc}  — retrying in {delay}s")
             time.sleep(delay)
 
-    schema_path = os.path.join("infra", "database", "rds", "schema.sql")
-    seed_path = os.path.join("infra", "database", "rds", "lookup-data.sql")
+    # schema_path = os.path.join("infra", "database", "rds", "schema.sql")
+    # seed_path = os.path.join("infra", "database", "rds", "lookup-data.sql")
+    schema_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "schema.sql")
+    seed_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "lookup-data.sql")
 
     with conn.cursor() as cur:
         for path in [schema_path, seed_path]:
@@ -188,9 +229,12 @@ def stage_force_deploy(outputs: dict):
 
 def stage_destroy():
     print("\n═══ Terraform destroy ═══")
-    tf(["destroy", "-auto-approve", "-input=false"])
+    tf([
+        "destroy", "-auto-approve", "-input=false",
+        f"-var=db_username={db_user}",
+        f"-var=db_password={db_pass}",
+    ])
     print("  All resources destroyed.")
-
 
 # ─── main ───────────────────────────────────────────────────────────
 
@@ -218,8 +262,9 @@ def main():
 
     if action in ("destroy", "all"):
         if action == "all":
-            input("\nPress ENTER to destroy all resources …")
-        stage_destroy()
+            keep_alive = os.environ.get("KEEP_ALIVE_AFTER_TEST", "false").lower() == "true"
+        if not keep_alive:
+            stage_destroy()
 
 
 if __name__ == "__main__":
