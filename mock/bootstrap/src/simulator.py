@@ -36,10 +36,14 @@ log = logging.getLogger("simulator")
 # Configuração
 # ---------------------------------------------------------------------------
 
-CRUD_URL      = os.getenv("CRUD_URL",      "http://localhost:8000")
-ORDER_URL     = os.getenv("ORDER_URL",     "http://localhost:8001")
-TRACKING_URL  = os.getenv("TRACKING_URL",  "http://localhost:8002")
-ROUTE_URL     = os.getenv("ROUTE_URL",     "http://localhost:8003")
+CRUD_URL      = os.getenv("CRUD_URL",      "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+ORDER_URL     = os.getenv("ORDER_URL",     "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+TRACKING_URL  = os.getenv("TRACKING_URL",  "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+ROUTE_URL     = os.getenv("ROUTE_URL",     "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+# CRUD_URL      = os.getenv("CRUD_URL",      "http://localhost:8000")
+# ORDER_URL     = os.getenv("ORDER_URL",     "http://localhost:8001")
+# TRACKING_URL  = os.getenv("TRACKING_URL",  "http://localhost:8002")
+# ROUTE_URL     = os.getenv("ROUTE_URL",     "http://localhost:8003")
 
 # Bounding box de São Paulo (fallback)
 SP_LAT_MIN, SP_LAT_MAX = -23.7000, -23.4000
@@ -56,7 +60,7 @@ class OrderState(int, Enum):
 @dataclass
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "normal")
-    orders_per_second: float = 1.0 # coloquei um pra testar, mas o normal é 10.0
+    orders_per_second: float = 10.0 # coloquei um pra testar, mas o normal é 10.0
     duration_seconds: int = int(os.getenv("SIM_DURATION", 60))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.5)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
@@ -67,7 +71,7 @@ class SimConfig:
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 2))
 
     def __post_init__(self):
-        scenario_rps = {"normal": 1.0, "peak": 50.0, "event": 200.0}
+        scenario_rps = {"normal": 10.0, "peak": 50.0, "event": 200.0}
         self.orders_per_second = scenario_rps.get(self.scenario, self.orders_per_second)
 
 # ---------------------------------------------------------------------------
@@ -224,14 +228,14 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     await advance(OrderState.PICKED_UP)
     await advance(OrderState.IN_TRANSIT)
 
-    log.info(waypoints)
+    # log.info(waypoints)
     # 4. Tracking a cada 100ms (Req. Não-Funcional)
-    # if courier_id:
-    #     for wp_lat, wp_lon in waypoints:
-    #         await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
-    #             "id_courier": courier_id, "lat": wp_lat, "lon": wp_lon, "status": "IN_TRANSIT"
-    #         })
-    #         await asyncio.sleep(config.position_report_interval)
+    if courier_id:
+        for wp_lat, wp_lon in waypoints:
+            await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
+                "ID_courier": courier_id, "lat": wp_lat, "lon": wp_lon
+            })
+            await asyncio.sleep(config.position_report_interval)
 
     await advance(OrderState.DELIVERED)
     metrics.orders_completed += 1
@@ -241,8 +245,8 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
 # ---------------------------------------------------------------------------
 
 async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
-    u_body = await _request(client, "GET", CRUD_URL, "/users?itemsPerPage=200", sem, config)
-    r_body = await _request(client, "GET", CRUD_URL, "/restaurants?itemsPerPage=200", sem, config)
+    u_body = await _request(client, "GET", CRUD_URL, "/users?itemsPerPage=5000", sem, config)
+    r_body = await _request(client, "GET", CRUD_URL, "/restaurants?itemsPerPage=500", sem, config)
 
     users = [u["id_user"] for u in (u_body.get("data") if u_body else [])]
     rests = [r["id_restaurant"] for r in (r_body.get("data") if r_body else [])]
@@ -269,7 +273,7 @@ async def order_emitter(client, users, restaurants, config):
 
     if tasks:
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
-        await asyncio.wait(tasks, timeout=60)
+        await asyncio.gather(*tasks)
 
 async def main():
     config = SimConfig()
