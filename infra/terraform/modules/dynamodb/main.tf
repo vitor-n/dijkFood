@@ -23,6 +23,9 @@ resource "aws_dynamodb_table" "courier_positions" {
     write_capacity     = 10
   }
 
+  read_capacity  = 10
+  write_capacity = 10
+
   point_in_time_recovery {
     enabled = true
   }
