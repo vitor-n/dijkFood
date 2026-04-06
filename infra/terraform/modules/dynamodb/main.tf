@@ -1,17 +1,17 @@
 resource "aws_dynamodb_table" "courier_positions" {
-  name         = "${var.project_name}-courier-positions"
-  billing_mode = "PAY_PER_REQUEST"
+  name         = "CourierTracking"
+  billing_mode = "PROVISIONED"
 
-  hash_key  = "courier_id"
+  hash_key     = "ID_courier"
   range_key = "timestamp"
 
   attribute {
-    name = "courier_id"
-    type = "S"
+    name = "ID_courier"
+    type = "N"
   }
 
   attribute {
-    name = "order_id"
+    name = "cell_index"
     type = "S"
   }
 
@@ -21,10 +21,13 @@ resource "aws_dynamodb_table" "courier_positions" {
   }
 
   global_secondary_index {
-    name            = "order-positions-index"
-    hash_key        = "order_id"
-    range_key       = "timestamp"
-    projection_type = "ALL"
+    name               = "CellIndex"
+    hash_key           = "cell_index"
+    range_key          = "ID_courier"
+    projection_type    = "INCLUDE"
+    non_key_attributes = ["status", "lat", "lon", "updated_at"]
+    read_capacity      = 10
+    write_capacity     = 10
   }
 
   ttl {
@@ -36,7 +39,5 @@ resource "aws_dynamodb_table" "courier_positions" {
     enabled = true
   }
 
-  tags = {
-    Name = "${var.project_name}-courier-positions"
-  }
+  tags = { Name = "CourierTracking" }
 }
