@@ -28,5 +28,8 @@ routing_desired  = 1
 routing_min      = 1
 routing_max      = 2
 
+db_username = "dijkfoodadmin"
+db_password = "12345678"
+
 execution_role_arn = "arn:aws:iam::974677730610:role/LabRole"
 task_role_arn      = "arn:aws:iam::974677730610:role/LabRole"
