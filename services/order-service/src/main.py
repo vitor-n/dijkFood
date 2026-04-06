@@ -13,7 +13,13 @@ from .models import (Order, OrderEvent, Restaurant,
                      OrderUpdateRequest, OrderUpdateResponse)
 from .config import settings
 
-app = FastAPI(title="DjikFood Routing Service")
+app = FastAPI(title="DijkFood Order Service")
+
+
+@app.get("/healthz", tags=["ops"])
+async def healthz():
+    return {"status": "ok"}
+
 
 engine = create_async_engine(settings.POSTGRES_ENDPOINT, echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

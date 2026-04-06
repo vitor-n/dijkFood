@@ -9,13 +9,13 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../database/rds/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ../database/rds/lookup-data.sql:/docker-entrypoint-initdb.d/02-lookup-data.sql
+      - ../database/rds/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../database/rds/lookup-data.sql:/docker-entrypoint-initdb.d/02-lookup-data.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dijkfood_admin -d dijkfood"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - dijkfood
 
@@ -23,20 +23,44 @@ services:
     image: amazon/dynamodb-local:latest
     command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data/"
     ports:
-      - "8002:8000"
+      - "8004:8000"
     volumes:
       - dynamodb_data:/home/dynamodblocal/data
+    networks:
+      - dijkfood
+
+  dynamodb-init:
+    image: amazon/aws-cli:2.17.33
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: us-east-1
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until aws dynamodb list-tables --endpoint-url http://dynamodb-local:8000 >/dev/null 2>&1; do
+          sleep 2
+        done
+        aws dynamodb describe-table --table-name CourierTracking --endpoint-url http://dynamodb-local:8000 >/dev/null 2>&1 || \
+        aws dynamodb create-table --cli-input-json file:///schema.json --endpoint-url http://dynamodb-local:8000
+    volumes:
+      - ../database/dynamo/schema.json:/schema.json:ro
+    restart: "no"
     networks:
       - dijkfood
 
   core-api:
     build:
       context: ../../
-      dockerfile: infra/docker/core-api.Dockerfile
+      dockerfile: services/core-api/Dockerfile
     environment:
-      DATABASE_URL: "postgresql+asyncpg://dijkfood_admin:${DB_PASSWORD:-localdev123}@postgres:5432/dijkfood"
-      DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
-      DYNAMODB_TABLE_POSITIONS: "dijkfood-courier-positions"
+      DATABASE_URL: postgresql+asyncpg://dijkfood_admin:${DB_PASSWORD:-localdev123}@postgres:5432/dijkfood
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      DYNAMO_TABLE: CourierTracking
       AWS_DEFAULT_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
@@ -45,19 +69,89 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      dynamodb-init:
+        condition: service_completed_successfully
+    networks:
+      - dijkfood
+
+  tracking-service:
+    build:
+      context: ../../
+      dockerfile: services/tracking-service/Dockerfile
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      DYNAMO_TABLE: CourierTracking
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    ports:
+      - "8002:8002"
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+    networks:
+      - dijkfood
+
+  order-service:
+    build:
+      context: ../../
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dijkfood_admin:${DB_PASSWORD:-localdev123}@postgres:5432/dijkfood
+      TRACKING_SERVICE_ENDPOINT: http://tracking-service:8002/
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tracking-service:
+        condition: service_healthy
     networks:
       - dijkfood
 
   routing-service:
     build:
       context: ../../
-      dockerfile: infra/docker/routing-service.Dockerfile
+      dockerfile: services/routing-service/Dockerfile
     environment:
       GRAPH_PATH: /data/sao_paulo.pkl
     ports:
       - "8001:8001"
     volumes:
-      - ${GRAPH_DATA_PATH:-./data}:/data:ro
+      - ../../services/routing-service/data:/data:ro
+    networks:
+      - dijkfood
+
+  bootstrap:
+    build:
+      context: ../../
+      dockerfile: mock/bootstrap/Dockerfile
+    profiles: ["tools"]
+    environment:
+      BASE_URL: http://core-api:8000
+      NUM_USERS: ${BOOTSTRAP_USERS:-100}
+      NUM_RESTAURANTS: ${BOOTSTRAP_RESTAURANTS:-20}
+      NUM_COURIERS: ${BOOTSTRAP_COURIERS:-80}
+      BOOTSTRAP_CONCURRENCY: ${BOOTSTRAP_CONCURRENCY:-20}
+    depends_on:
+      core-api:
+        condition: service_healthy
+    networks:
+      - dijkfood
+
+  simulator:
+    build:
+      context: ../../
+      dockerfile: mock/something/Dockerfile
+    profiles: ["tools"]
+    environment:
+      CORE_API_BASE_URL: http://core-api:8000
+      ORDER_API_BASE_URL: http://order-service:8003
+      TRACKING_API_BASE_URL: http://tracking-service:8002
+    depends_on:
+      order-service:
+        condition: service_healthy
     networks:
       - dijkfood
 

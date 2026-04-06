@@ -136,8 +136,8 @@ def stage_build_push(outputs: dict):
     ecr_login(region, first_url)
 
     services_dockerfiles = {
-        "core-api": os.path.join(DOCKER_DIR, "core-api.Dockerfile"),
-        "routing-service": os.path.join(DOCKER_DIR, "routing-service.Dockerfile"),
+        "core-api": os.path.join("services", "core-api", "Dockerfile"),
+        "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
     }
 
     for svc, dockerfile in services_dockerfiles.items():

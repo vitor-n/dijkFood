@@ -2,6 +2,10 @@ import time
 from enum import Enum
 from typing import List, Dict
 from pydantic import BaseModel
+import time
+from enum import Enum
+from typing import List, Dict
+from pydantic import BaseModel
 from functools import lru_cache
 
 import h3
@@ -11,8 +15,16 @@ from fastapi import FastAPI, Depends, HTTPException, status, Body
 from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest, StatusUpdate
 from .config import settings
 from .repository import CourierRepository
+from .config import settings
+from .dynamo import dynamodb_resource
 
 app = FastAPI(title="DijkFood Tracking Service")
+
+
+@app.get("/healthz", tags=["ops"])
+async def healthz():
+    return {"status": "ok"}
+
 
 @lru_cache()
 def get_courier_repo():
@@ -26,28 +38,30 @@ def get_courier_repo():
 @app.post("/tracking/position")
 async def update_position(
     data: CourierPositionUpdate,
-    repo: CourierRepository = Depends(get_courier_repo)
+    repo: CourierRepository = Depends(get_courier_repo),
 ):
     try:
         repo.update_location(data)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return { "message": "position captured" }
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"message": "position captured"}
+
 
 @app.patch("/tracking/status")
 async def update_status(
     req: StatusUpdate,
-    repo: CourierRepository = Depends(get_courier_repo)
+    repo: CourierRepository = Depends(get_courier_repo),
 ):
     try:
         repo.update_status(req.ID_courier, req.status)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return { "message": "status captured" }
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"message": "status captured"}
+
 
 @app.get("/tracking/nearby")
 async def find_nearby_courier(
     req: NearbyCourierRequest = Depends(),
-    repo: CourierRepository = Depends(get_courier_repo)
+    repo: CourierRepository = Depends(get_courier_repo),
 ):
     return repo.get_nearby(req.lat, req.lon)
