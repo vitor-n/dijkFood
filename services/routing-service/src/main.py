@@ -8,10 +8,15 @@ import osmnx as ox
 import networkx as nx
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="DjiFood Routing Service")
+app = FastAPI(title="DijkFood Routing Service")
 
 @app.get("/healthz", tags=["ops"])
 async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/routes/healthz", tags=["ops"])
+async def routes_healthz():
     return {"status": "ok"}
 
 GRAPH_PATH = os.getenv("GRAPH_PATH", "data/sao_paulo.pkl")

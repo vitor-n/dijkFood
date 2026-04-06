@@ -6,3 +6,4 @@ scikit-learn
 osmnx
 networkx
 boto3
+python-dotenv

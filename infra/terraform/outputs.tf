@@ -30,7 +30,7 @@ output "graph_bucket_name" {
 }
 
 output "dynamodb_table_name" {
-  description = "DynamoDB table for courier positions"
+  description = "DynamoDB table for courier tracking"
   value       = module.dynamodb.courier_positions_table_name
 }
 

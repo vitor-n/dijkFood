@@ -167,7 +167,7 @@ async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> i
     # loc = sp_location()
     body = await post_with_retry(client, f"{BASE_URL}/couriers", {
         "name":            fake.name(),
-        "ID_vehicle_type": random.choice(VEHICLE_TYPE_IDS)#,
+        "ID_vehicle_type": random.choice(VEHICLE_TYPE_IDS),
         # "lat":             loc["lat"],
         # "lon":             loc["lon"],
     }, sem)
