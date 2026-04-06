@@ -95,7 +95,12 @@ async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get
 
 
 @app.patch("/order", response_model = OrderUpdateResponse)
-async def update_order(req: OrderUpdateRequest, db: AsyncSession = Depends(get_db)):
+async def update_order(
+    req: OrderUpdateRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    if req.id_state < 2 or req.id_state > 6:
+        raise HTTPException(status_code = 400, detail = "Invalid state for update operation")
     try:
         with open("./order_update_query.sql") as f:
             sql_query = f.read()
@@ -110,6 +115,22 @@ async def update_order(req: OrderUpdateRequest, db: AsyncSession = Depends(get_d
             #TODO: add proper handling
             raise HTTPException(status_code=404, detail="Order not found or invalid status")
         
+        if req.id_state == 6:
+            stmt = select(Order).where(Order.ID_order == req.id_order)
+            order_result = await db.execute(stmt)
+            order = order_result.scalar_one_or_none()
+
+            if order is None:
+                raise HTTPException(status_code = 500, detail = "Internal error: failed to mark courier as available, aborting")
+    
+            async with httpx.AsyncClient() as client:
+                response = await client.patch(
+                    urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
+                    json = {"ID_courier": order.ID_courier, "status": "AVAILABLE"},
+                    timeout = 2.0
+                )
+                response.raise_for_status()
+
         await db.commit()
         row_dict = updated_row._mapping
         
