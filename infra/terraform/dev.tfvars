@@ -10,6 +10,17 @@ core_api_memory  = 1024
 core_api_desired = 1
 core_api_min     = 1
 core_api_max     = 2
+tracking_cpu      = 512
+tracking_memory   = 1024
+tracking_desired  = 1
+tracking_min      = 1
+tracking_max      = 2
+
+order_cpu         = 512
+order_memory      = 1024
+order_desired     = 1
+order_min         = 1
+order_max         = 2
 
 routing_cpu      = 1024
 routing_memory   = 2048

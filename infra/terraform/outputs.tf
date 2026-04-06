@@ -48,3 +48,13 @@ output "routing_service_name" {
   description = "ECS service name for routing-service"
   value       = module.ecs.routing_service_name
 }
+
+output "tracking_service_name" {
+  description = "ECS service name for tracking-service"
+  value       = module.ecs.tracking_service_name
+}
+
+output "order_service_name" {
+  description = "ECS service name for order-service"
+  value       = module.ecs.order_service_name
+}

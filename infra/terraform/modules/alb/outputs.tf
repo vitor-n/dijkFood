@@ -30,3 +30,19 @@ output "routing_target_group_arn_suffix" {
 output "security_group_id" {
   value = var.security_group_id
 }
+
+output "tracking_target_group_arn" {
+  value = aws_lb_target_group.tracking.arn
+}
+
+output "tracking_target_group_arn_suffix" {
+  value = aws_lb_target_group.tracking.arn_suffix
+}
+
+output "order_target_group_arn" {
+  value = aws_lb_target_group.order.arn
+}
+
+output "order_target_group_arn_suffix" {
+  value = aws_lb_target_group.order.arn_suffix
+}
