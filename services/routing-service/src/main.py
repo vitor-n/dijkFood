@@ -21,7 +21,7 @@ async def routes_healthz():
     return {"status": "ok"}
 
 # DEFAULT_GRAPH_PATH = Path(__file__).resolve().parent.parent / "data" / "sao_paulo.pkl"
-GRAPH_PATH = os.getenv("GRAPH_PATH")
+GRAPH_PATH = "/app/data/sao_paulo.pkl"
 
 with open(GRAPH_PATH, "rb") as f:
     G = pickle.load(f)
