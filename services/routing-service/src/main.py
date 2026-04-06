@@ -34,7 +34,7 @@ class RouteRequest(BaseModel):
 class RouteResponse(BaseModel):
     distance_meters: float
     estimated_time_seconds: float
-    path_nodes: list[int]
+    path_nodes: list[list[float, float]]
 
 nodes_data = ox.graph_to_gdfs(G, edges=False)
 node_ids = nodes_data.index.tolist()
@@ -54,6 +54,7 @@ async def find_route(req: RouteRequest):
     dest_node = node_ids[indices[1][0]]
     
     distance, route = nx.bidirectional_dijkstra(G, orig_node, dest_node, weight="length")
+    route = list(map(lambda x: nodes_data.loc[x][["y", "x"]].values.tolist(), route))
 
     return RouteResponse(
             distance_meters = round(distance, 2),
