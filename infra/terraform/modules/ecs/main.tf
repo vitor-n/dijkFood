@@ -61,7 +61,7 @@ resource "aws_ecs_task_definition" "core_api" {
   network_mode             = "awsvpc"
   cpu                      = var.core_api_cpu
   memory                   = var.core_api_memory
-  execution_role_arn       = var.execution_role_arn 
+  execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
 
   container_definitions = jsonencode([{
@@ -145,16 +145,16 @@ resource "aws_ecs_task_definition" "routing" {
 # ──────────────────────────────────────────────
 
 resource "aws_ecs_service" "core_api" {
-  name            = "${var.project_name}-core-api"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.core_api.arn
-  desired_count   = var.core_api_desired
-  launch_type     = "FARGATE"
+  name                   = "${var.project_name}-core-api"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.core_api.arn
+  desired_count          = var.core_api_desired
+  launch_type            = "FARGATE"
   enable_execute_command = true
 
   deployment_circuit_breaker {
-  enable   = true
-  rollback = true
+    enable   = true
+    rollback = true
   }
 
   network_configuration {
@@ -174,20 +174,20 @@ resource "aws_ecs_service" "core_api" {
   health_check_grace_period_seconds  = 60
 
   lifecycle { ignore_changes = [desired_count, task_definition] }
- 
+
 }
 
 resource "aws_ecs_service" "routing" {
-  name            = "${var.project_name}-routing"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.routing.arn
-  desired_count   = var.routing_desired
-  launch_type     = "FARGATE"
+  name                   = "${var.project_name}-routing"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.routing.arn
+  desired_count          = var.routing_desired
+  launch_type            = "FARGATE"
   enable_execute_command = true
 
   deployment_circuit_breaker {
-  enable   = true
-  rollback = true
+    enable   = true
+    rollback = true
   }
 
   network_configuration {

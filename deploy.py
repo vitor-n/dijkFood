@@ -173,12 +173,15 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
     first_url = next(iter(ecr_urls.values()))
     ecr_login(region, first_url)
 
-    for svc, dockerfile_rel in SERVICE_IMAGES:
-        if svc not in ecr_urls:
-            raise KeyError(f"Repositório ECR ausente para {svc!r} em terraform output")
-        dockerfile = os.path.join(PROJECT_ROOT, dockerfile_rel)
-        if not os.path.isfile(dockerfile):
-            raise FileNotFoundError(f"Dockerfile não encontrado: {dockerfile}")
+    # Todos os 4 serviços adicionados aqui
+    services_dockerfiles = {
+        "core-api": os.path.join("services", "core-api", "Dockerfile"),
+        "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
+        "tracking-service": os.path.join("services", "tracking-service", "Dockerfile"),
+        "order-service": os.path.join("services", "order-service", "Dockerfile"),
+    }
+
+    for svc, dockerfile in services_dockerfiles.items():
         ecr_url = ecr_urls[svc]
         tag = f"{ecr_url}:latest"
         print(f"\n  [{svc}] build → {tag}")
@@ -248,50 +251,37 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     print("\n═══ Novo deployment ECS (todas as services) ═══")
     region = outputs["aws_region"]["value"]
     cluster = outputs["ecs_cluster_name"]["value"]
-    names: list[str] = []
-    for key in ECS_SERVICE_OUTPUT_KEYS:
-        names.append(outputs[key]["value"])
+    
+    # Todos os 4 serviços incluídos na lista de atualização
+    services_to_deploy = [
+        "core_api_service_name", 
+        "routing_service_name",
+        "tracking_service_name",
+        "order_service_name"
+    ]
+    
+    for svc_key in services_to_deploy:
+        svc = outputs[svc_key]["value"]
+        run(["aws", "ecs", "update-service",
+             "--cluster", cluster,
+             "--service", svc,
+             "--force-new-deployment",
+             "--region", outputs["aws_region"]["value"]],
+            capture=True)
+        print(f"  Triggered redeployment for {svc}")
 
-    for svc in names:
-        run(
-            [
-                "aws",
-                "ecs",
-                "update-service",
-                "--cluster",
-                cluster,
-                "--service",
-                svc,
-                "--force-new-deployment",
-                "--region",
-                region,
-            ],
-            capture=True,
-        )
-        print(f"  Forçado redeploy: {svc}")
-
-    print("\n  Aguardando estabilização dos serviços…")
-    # Pode levar vários minutos após o primeiro deploy
-    run(
-        [
-            "aws",
-            "ecs",
-            "wait",
-            "services-stable",
-            "--cluster",
-            cluster,
-            "--services",
-            *names,
-            "--region",
-            region,
-        ],
-    )
-    for svc in names:
-        print(f"  ✓ Estável: {svc}")
+    print("\n  Waiting for services to stabilise …")
+    for svc_key in services_to_deploy:
+        svc = outputs[svc_key]["value"]
+        run(["aws", "ecs", "wait", "services-stable",
+             "--cluster", cluster,
+             "--services", svc,
+             "--region", outputs["aws_region"]["value"]])
+        print(f"  ✓ {svc} is stable")
 
     alb_dns = outputs["alb_dns_name"]["value"]
-    print(f"\n  ALB: http://{alb_dns}")
-
+    print(f"\n  API available at: http://{alb_dns}")
+    
 
 def stage_smoke_test(outputs: dict[str, Any]) -> None:
     print("\n═══ Smoke test (via ALB) ═══")

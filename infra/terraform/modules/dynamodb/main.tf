@@ -2,11 +2,10 @@ resource "aws_dynamodb_table" "courier_positions" {
   name         = "CourierTracking"
   billing_mode = "PROVISIONED"
 
-  hash_key     = "ID_courier"
-  range_key = "timestamp"
+  hash_key  = "ID_courier"
 
-  read_capacity      = 10
-  write_capacity     = 10
+  read_capacity  = 10
+  write_capacity = 10
 
   attribute {
     name = "ID_courier"
@@ -18,11 +17,6 @@ resource "aws_dynamodb_table" "courier_positions" {
     type = "S"
   }
 
-  attribute {
-    name = "timestamp"
-    type = "N"
-  }
-
   global_secondary_index {
     name               = "CellIndex"
     hash_key           = "cell_index"
@@ -31,11 +25,6 @@ resource "aws_dynamodb_table" "courier_positions" {
     non_key_attributes = ["status", "lat", "lon", "updated_at"]
     read_capacity      = 10
     write_capacity     = 10
-  }
-
-  ttl {
-    attribute_name = "expires_at"
-    enabled        = true
   }
 
   point_in_time_recovery {
