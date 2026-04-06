@@ -3,6 +3,7 @@ import pickle
 import numpy as np
 from pydantic import BaseModel
 from sklearn.neighbors import BallTree
+from pathlib import Path
 
 import osmnx as ox
 import networkx as nx
@@ -19,7 +20,8 @@ async def healthz():
 async def routes_healthz():
     return {"status": "ok"}
 
-GRAPH_PATH = os.getenv("GRAPH_PATH", "data/sao_paulo.pkl")
+DEFAULT_GRAPH_PATH = Path(__file__).resolve().parent.parent / "data" / "sao_paulo.pkl"
+GRAPH_PATH = os.getenv("GRAPH_PATH", str(DEFAULT_GRAPH_PATH))
 
 with open(GRAPH_PATH, "rb") as f:
     G = pickle.load(f)

@@ -116,8 +116,6 @@ resource "aws_ecs_task_definition" "routing" {
 
     environment = [
       { name = "GRAPH_PATH", value = "/data/sao_paulo.pkl" },
-      { name = "S3_BUCKET", value = var.graph_bucket_name },
-      { name = "S3_GRAPH_KEY", value = "graph/sao_paulo.pkl" },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
     ]
 
