@@ -2,11 +2,11 @@ resource "aws_dynamodb_table" "courier_positions" {
   name         = "CourierTracking"
   billing_mode = "PROVISIONED"
 
-  hash_key     = "ID_courier"
+  hash_key  = "ID_courier"
   range_key = "timestamp"
 
-  read_capacity      = 10
-  write_capacity     = 10
+  read_capacity  = 10
+  write_capacity = 10
 
   attribute {
     name = "ID_courier"

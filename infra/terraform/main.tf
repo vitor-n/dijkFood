@@ -179,8 +179,8 @@ module "ecs" {
   execution_role_arn = var.execution_role_arn
   task_role_arn      = var.task_role_arn
 
-  core_api_image        = module.ecr.repository_urls["core-api"]
-  routing_service_image = module.ecr.repository_urls["routing-service"]
+  core_api_image         = module.ecr.repository_urls["core-api"]
+  routing_service_image  = module.ecr.repository_urls["routing-service"]
   tracking_service_image = module.ecr.repository_urls["tracking-service"]
   order_service_image    = module.ecr.repository_urls["order-service"]
 
