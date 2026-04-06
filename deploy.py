@@ -135,9 +135,12 @@ def stage_build_push(outputs: dict):
     first_url = next(iter(ecr_urls.values()))
     ecr_login(region, first_url)
 
+    # Todos os 4 serviços adicionados aqui
     services_dockerfiles = {
         "core-api": os.path.join("services", "core-api", "Dockerfile"),
         "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
+        "tracking-service": os.path.join("services", "tracking-service", "Dockerfile"),
+        "order-service": os.path.join("services", "order-service", "Dockerfile"),
     }
 
     for svc, dockerfile in services_dockerfiles.items():
@@ -204,7 +207,16 @@ def stage_init_database(outputs: dict, db_user: str, db_pass: str):
 def stage_force_deploy(outputs: dict):
     print("\n═══ Stage 6/6: Force new ECS deployment ═══")
     cluster = outputs["ecs_cluster_name"]["value"]
-    for svc_key in ["core_api_service_name", "routing_service_name"]:
+    
+    # Todos os 4 serviços incluídos na lista de atualização
+    services_to_deploy = [
+        "core_api_service_name", 
+        "routing_service_name",
+        "tracking_service_name",
+        "order_service_name"
+    ]
+    
+    for svc_key in services_to_deploy:
         svc = outputs[svc_key]["value"]
         run(["aws", "ecs", "update-service",
              "--cluster", cluster,
@@ -215,7 +227,7 @@ def stage_force_deploy(outputs: dict):
         print(f"  Triggered redeployment for {svc}")
 
     print("\n  Waiting for services to stabilise …")
-    for svc_key in ["core_api_service_name", "routing_service_name"]:
+    for svc_key in services_to_deploy:
         svc = outputs[svc_key]["value"]
         run(["aws", "ecs", "wait", "services-stable",
              "--cluster", cluster,
@@ -225,7 +237,7 @@ def stage_force_deploy(outputs: dict):
 
     alb_dns = outputs["alb_dns_name"]["value"]
     print(f"\n  API available at: http://{alb_dns}")
-
+    
 
 def stage_destroy():
     print("\n═══ Terraform destroy ═══")
