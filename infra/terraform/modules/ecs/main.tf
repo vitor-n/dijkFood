@@ -115,7 +115,7 @@ resource "aws_ecs_task_definition" "routing" {
     portMappings = [{ containerPort = 8001, protocol = "tcp" }]
 
     environment = [
-      { name = "GRAPH_PATH", value = "/data/sao_paulo.pkl" },
+      { name = "GRAPH_PATH", value = "/app/data/sao_paulo.pkl" },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
     ]
 

@@ -21,7 +21,7 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    GRAPH_PATH=/data/sao_paulo.pkl
+    GRAPH_PATH=/app/data/sao_paulo.pkl
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libgdal32 && \
