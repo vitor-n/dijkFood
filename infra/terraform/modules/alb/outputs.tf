@@ -28,7 +28,7 @@ output "routing_target_group_arn_suffix" {
 }
 
 output "security_group_id" {
-  value = var.security_group_id
+  value = var.alb_security_group_id
 }
 
 output "tracking_target_group_arn" {
