@@ -40,6 +40,8 @@ COPY services/routing-service/src ./src
 
 USER appuser
 
+RUN ls -la /app/data && echo "LISTAGEM DE ARQUIVOS NA PASTA /app/data"
+
 EXPOSE 8001
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=120s \
