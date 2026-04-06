@@ -1,9 +1,6 @@
 asyncpg
-boto3
 fastapi
-fastcrud
-h3
-psycopg2-binary
+httpx
 pydantic
 python-dotenv
 sqlalchemy

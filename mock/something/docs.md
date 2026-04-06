@@ -2,7 +2,9 @@
 
 | Variável | Default | Descrição |
 |---|---|---|
-| `API_BASE_URL` | `http://localhost:8000` | URL base da API |
+| `CORE_API_BASE_URL` | `http://localhost:8000` | URL da core-api |
+| `ORDER_API_BASE_URL` | `http://localhost:8003` | URL do order-service |
+| `TRACKING_API_BASE_URL` | `http://localhost:8002` | URL do tracking-service |
 | `ORDERS_PER_SECOND` | `10` | Taxa de emissão de pedidos |
 | `TOTAL_ORDERS` | *(vazio = ilimitado)* | Quantidade total de pedidos |
 | `MAX_CONCURRENT_ORDERS` | `200` | Pedidos simultâneos máximos |

@@ -11,8 +11,8 @@ core_api_desired = 2
 core_api_min     = 2
 core_api_max     = 10
 
-routing_cpu      = 1024
-routing_memory   = 2048
-routing_desired  = 2
-routing_min      = 1
-routing_max      = 6
+routing_cpu     = 1024
+routing_memory  = 2048
+routing_desired = 2
+routing_min     = 1
+routing_max     = 6
