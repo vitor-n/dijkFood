@@ -5,6 +5,9 @@ resource "aws_dynamodb_table" "courier_positions" {
   hash_key     = "ID_courier"
   range_key = "timestamp"
 
+  read_capacity      = 10
+  write_capacity     = 10
+
   attribute {
     name = "ID_courier"
     type = "N"
