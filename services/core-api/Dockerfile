@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/core-api/src ./src
 
+COPY infra/database/rds/schema.sql ./sql/schema.sql
+COPY infra/database/rds/lookup-data.sql ./sql/lookup-data.sql
+
 USER appuser
 
 EXPOSE 8000

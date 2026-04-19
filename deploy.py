@@ -15,6 +15,8 @@ Variáveis de ambiente:
                         para schema/seed. Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode
                         ficar vazia se estiver só no TF_VAR_FILE.
     DB_USERNAME         Usuário RDS (default: dijkfood_admin).
+    TF_VAR_execution_role_arn Deve ser preenchida com a role do arn existente no lab
+    TF_VAR_task_role_arn Deve ser preenchida com a role do arn existente no lab
     TF_VAR_FILE         .tfvars (ex.: dev.tfvars), buscado na raiz do repo e em infra/terraform.
     GRAPH_FILE_PATH     sao_paulo.pkl (default: services/routing-service/data/sao_paulo.pkl).
     SKIP_DB_INIT        Se "1"/"true", não aplica schema.sql no RDS (resto do deploy segue).
@@ -65,22 +67,14 @@ def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def run(
-    cmd: list[str] | str,
-    *,
-    cwd: str | None = None,
-    capture: bool = False,
-    shell: bool = False,
-    check: bool = True,
-) -> subprocess.CompletedProcess[Any]:
-    kwargs: dict[str, Any] = dict(cwd=cwd, shell=shell, check=check)
+def run_command(cmd, *, cwd = None, capture = False, shell = False, check = True):
+    kwargs = dict(cwd = cwd, shell = shell, check = check)
     if capture:
         kwargs["capture_output"] = True
         kwargs["text"] = True
     display = cmd if isinstance(cmd, str) else " ".join(cmd)
-    print(f"\n>>> {display}")
+    print(f"\n running command {display}")
     return subprocess.run(cmd, **kwargs)
-
 
 def terraform_var_file_args() -> list[str]:
     raw = os.environ.get("TF_VAR_FILE", "").strip()
@@ -106,18 +100,19 @@ def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
     return [f"-var=db_username={db_user}", f"-var=db_password={db_pass}"]
 
 
-def tf(args: list[str], **kw: Any) -> subprocess.CompletedProcess[Any]:
-    return run(["terraform", *args], cwd=TF_ABS, **kw)
+def execute_terraform_command(args: list[str], **kw: Any) -> subprocess.CompletedProcess[Any]:
+    return run_command(["terraform", *args], cwd=TF_ABS, **kw)
 
 
 def tf_output() -> dict[str, Any]:
-    result = tf(["output", "-json"], capture=True)
+    result = execute_terraform_command(["output", "-json"], capture=True)
     return json.loads(result.stdout)
 
 
 def ecr_login(region: str, registry_url: str) -> None:
+    """Faz login no ECR usando uma url e a região, para poder subir as imagens do docker"""
     registry_host = registry_url.split("/")[0]
-    token = run(
+    token = run_command(
         ["aws", "ecr", "get-login-password", "--region", region],
         capture=True,
     ).stdout.strip()
@@ -130,18 +125,18 @@ def ecr_login(region: str, registry_url: str) -> None:
 
 
 def stage_terraform_init() -> None:
-    print("\n═══ Terraform init ═══")
-    tf(["init", "-input=false"])
+    print("\n═════════ Iniciando terraform ═════════")
+    execute_terraform_command(["init", "-input=false"])
 
 
 def stage_terraform_plan(db_user: str, db_pass: str | None) -> None:
     print("\n═══ Terraform plan ═══")
     args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass)]
-    tf(args)
+    execute_terraform_command(args)
 
 
 def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
-    print("\n═══ Terraform apply ═══")
+    print("\n═════════ Aplicando infraestrutura definida no Terraform ═════════")
     args = [
         "apply",
         "-auto-approve",
@@ -149,7 +144,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
         *terraform_var_file_args(),
         *terraform_db_var_args(db_user, db_pass),
     ]
-    tf(args)
+    execute_terraform_command(args)
 
 
 def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
@@ -161,19 +156,21 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
         *terraform_var_file_args(),
         *terraform_db_var_args(db_user, db_pass),
     ]
-    tf(args)
+    execute_terraform_command(args)
     print("  Recursos AWS removidos (conforme o state do Terraform).")
 
 
 def stage_build_push(outputs: dict[str, Any]) -> None:
-    print("\n═══ Build e push das imagens (ECR) ═══")
+    print("\n═════════ Fazendo deploy das imagens docker (ECR) ═════════")
+    
+    #Pega a região e a url de algum dos repositórios pra poder fazer login com o cli
     region = outputs["aws_region"]["value"]
-    ecr_urls: dict[str, str] = outputs["ecr_repository_urls"]["value"]
+    ecr_urls = outputs["ecr_repository_urls"]["value"]
+    first_url = next(iter(ecr_urls.values())) #pega a url do ecr pra colocar as imagens
 
-    first_url = next(iter(ecr_urls.values()))
     ecr_login(region, first_url)
 
-    # Todos os 4 serviços adicionados aqui
+    #Lista dos caminhos dos containers. Feito na mão pros serviços atuais
     services_dockerfiles = {
         "core-api": os.path.join("services", "core-api", "Dockerfile"),
         "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
@@ -181,13 +178,12 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         "order-service": os.path.join("services", "order-service", "Dockerfile"),
     }
 
-    for svc, dockerfile in services_dockerfiles.items():
-        ecr_url = ecr_urls[svc]
-        tag = f"{ecr_url}:latest"
-        print(f"\n  [{svc}] build → {tag}")
-        run(["docker", "build", "-f", dockerfile_rel, "-t", tag, "."], cwd=PROJECT_ROOT)
-        print(f"  [{svc}] push")
-        run(["docker", "push", tag], cwd=PROJECT_ROOT)
+    for service, dockerfile_path in services_dockerfiles.items():
+        print(f"\n  Rodando build e push serviço {service}")
+        ecr_url = ecr_urls[service]
+        tag = f"{ecr_url}:latest" #coloca como latest para que o ecs atualize sozinho
+        run_command(["docker", "build", "-f", dockerfile_path, "-t", tag, "./"], cwd=PROJECT_ROOT)
+        run_command(["docker", "push", tag], cwd=PROJECT_ROOT)
 
 
 def stage_upload_graph(outputs: dict[str, Any]) -> None:
@@ -197,7 +193,7 @@ def stage_upload_graph(outputs: dict[str, Any]) -> None:
         print(f"  [SKIP] Arquivo de grafo não encontrado: {graph_path}")
         return
     bucket = outputs["graph_bucket_name"]["value"]
-    run(
+    run_command(
         [
             "aws",
             "s3",
@@ -261,58 +257,56 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     ]
     
     for svc_key in services_to_deploy:
-        svc = outputs[svc_key]["value"]
-        run(["aws", "ecs", "update-service",
+        svc = outputs[svc_key]["value"] #pega do output do terraform qual o nome do servico
+        run_command(["aws", "ecs", "update-service",
              "--cluster", cluster,
              "--service", svc,
              "--force-new-deployment",
              "--region", outputs["aws_region"]["value"]],
             capture=True)
-        print(f"  Triggered redeployment for {svc}")
+        print(f"  Pedido para redeploy do servico {svc} feito")
 
-    print("\n  Waiting for services to stabilise …")
+    print("\n  Aguardando pela estabilização dos serviços...")
     for svc_key in services_to_deploy:
         svc = outputs[svc_key]["value"]
-        run(["aws", "ecs", "wait", "services-stable",
+        run_command(["aws", "ecs", "wait", "services-stable",
              "--cluster", cluster,
              "--services", svc,
              "--region", outputs["aws_region"]["value"]])
-        print(f"  ✓ {svc} is stable")
+        print(f"  {svc} está estável")
 
     alb_dns = outputs["alb_dns_name"]["value"]
-    print(f"\n  API available at: http://{alb_dns}")
+    print(f"\n  Link da API com deploy: http://{alb_dns}")
     
 
 def stage_smoke_test(outputs: dict[str, Any]) -> None:
-    print("\n═══ Smoke test (via ALB) ═══")
-    alb_dns = outputs["alb_dns_name"]["value"]
+    print("\n═════════ Testando os serviços com deploy (via ALB) ═════════")
+    
+    alb_dns = outputs["alb_dns_name"]["value"] #pega o link em que o alb colocou os recursos
     base = f"http://{alb_dns}"
 
     urls = [
         (f"{base}/healthz", "core-api"),
         (f"{base}/docs", "core-api OpenAPI"),
         (f"{base}/routes/healthz", "routing-service"),
-        (
-            f"{base}/tracking/nearby?lat=-23.55&lon=-46.63",
-            "tracking-service (nearby)",
-        ),
+        (f"{base}/tracking/nearby?lat=-23.55&lon=-46.63", "tracking-service (nearby)",),
+        (f"{base}/order", "order-service")
     ]
 
     for url, label in urls:
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=45) as resp:
-                print(f"  ✓ [{label}] {url} → HTTP {resp.status}")
+                print(f"  [{label}] {url} → status do request HTTP {resp.status}")
         except urllib.error.HTTPError as exc:
-            # nearby pode retornar 4xx em alguns cenários; aceitamos 2xx/422 de validação
-            if exc.code in (400, 422):
-                print(f"  ~ [{label}] {url} → HTTP {exc.code} (aceito para smoke)")
+            if exc.code in (400, 405, 422):
+                print(f"  ~ [{label}] {url} → status do request HTTP {exc.code} (aceito no teste de saúde)")
             else:
-                raise RuntimeError(f"Smoke falhou [{label}] {url}: HTTP {exc.code}") from exc
+                raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: HTTP {exc.code}") from exc
         except Exception as exc:
-            raise RuntimeError(f"Smoke falhou [{label}] {url}: {exc}") from exc
+            raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: {exc}") from exc
 
-    print("  Smoke test concluído.")
+    print("  Teste de saúde concluído.")
 
 
 def stage_smoke_from_state() -> None:
@@ -322,28 +316,26 @@ def stage_smoke_from_state() -> None:
     stage_smoke_test(out)
 
 
+#Função principal para executar todo o workflow
 def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
-    """db_password: repassa ao Terraform (-var) se definida; exigida para psycopg2 exceto com SKIP_DB_INIT."""
+    #Executa terraform init
     stage_terraform_init()
+
+    #Executa o comando terraform apply, espera-se que a variável de ambiente de usuário e a de senham estejam setadas aqui
     stage_terraform_apply(db_user, db_password)
+
+    #Pega os outputs do comando do terraform, pra usar eles
     outputs = tf_output()
+
+    #Roda os comandos docker (docker login, docker build e docker push pra cada imagem)
     stage_build_push(outputs)
-    stage_upload_graph(outputs)
-    if _truthy("SKIP_DB_INIT"):
-        print("\n  (SKIP_DB_INIT=1 — inicialização do schema RDS ignorada)")
-    else:
-        if not db_password:
-            print(
-                "ERRO: DB_PASSWORD é obrigatório para aplicar schema.sql no RDS "
-                "(ou use SKIP_DB_INIT=1 se o banco já estiver inicializado)."
-            )
-            sys.exit(1)
-        stage_init_database(outputs, db_user, db_password)
+
+    #atualiza o ECS pra poder rodar 
     stage_force_ecs_deploy(outputs)
-    if not _truthy("SKIP_SMOKE_TEST"):
-        stage_smoke_test(outputs)
-    else:
-        print("\n  (SKIP_SMOKE_TEST definido — smoke test ignorado)")
+
+    #Faz um check básico da saúde dos serviços
+    stage_smoke_test(outputs)
+    
     return outputs
 
 
