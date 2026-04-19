@@ -1,0 +1,51 @@
+{
+  "TableName": "CourierTracking",
+  "KeySchema": [
+    {
+      "AttributeName": "ID_courier",
+      "KeyType": "HASH"
+    }
+  ],
+  "AttributeDefinitions": [
+    {
+      "AttributeName": "ID_courier",
+      "AttributeType": "N"
+    },
+    {
+      "AttributeName": "cell_index",
+      "AttributeType": "S"
+    }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "CellIndex",
+      "KeySchema": [
+        {
+          "AttributeName": "cell_index",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "ID_courier",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "INCLUDE",
+        "NonKeyAttributes": [
+          "status",
+          "lat",
+          "lon",
+          "updated_at"
+        ]
+      },
+      "ProvisionedThroughput": {
+        "ReadCapacityUnits": 10,
+        "WriteCapacityUnits": 10
+      }
+    }
+  ],
+  "ProvisionedThroughput": {
+    "ReadCapacityUnits": 10,
+    "WriteCapacityUnits": 10
+  }
+}

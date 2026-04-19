@@ -29,8 +29,8 @@ log = logging.getLogger("bootstrap")
 # Configuração via env
 # ---------------------------------------------------------------------------
 
-BASE_URL            = os.getenv("BASE_URL", "http://localhost:8000")
-NUM_USERS           = int(os.getenv("NUM_USERS", 1000))
+BASE_URL            = os.getenv("BASE_URL", "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+NUM_USERS           = int(os.getenv("NUM_USERS", 2000))
 NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 50))
 NUM_COURIERS        = int(os.getenv("NUM_COURIERS", NUM_USERS * 3))
 # ITEMS_PER_RESTAURANT = int(os.getenv("ITEMS_PER_RESTAURANT", 8))
@@ -164,12 +164,12 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore) -
 
 
 async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int | None:
-    # loc = sp_location()
+    loc = sp_location()
     body = await post_with_retry(client, f"{BASE_URL}/couriers", {
         "name":            fake.name(),
-        "ID_vehicle_type": random.choice(VEHICLE_TYPE_IDS)#,
-        # "lat":             loc["lat"],
-        # "lon":             loc["lon"],
+        "ID_vehicle_type": random.choice(VEHICLE_TYPE_IDS),
+        "lat":             loc["lat"],
+        "lon":             loc["lon"],
     }, sem)
     if body is None:
         return None

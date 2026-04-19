@@ -21,3 +21,11 @@ output "execution_role_arn" {
 output "task_role_arn" {
   value = var.task_role_arn
 }
+
+output "tracking_service_name" {
+  value = aws_ecs_service.tracking.name
+}
+
+output "order_service_name" {
+  value = aws_ecs_service.order.name
+}

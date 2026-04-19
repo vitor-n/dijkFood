@@ -30,7 +30,7 @@ output "graph_bucket_name" {
 }
 
 output "dynamodb_table_name" {
-  description = "DynamoDB table for courier positions"
+  description = "DynamoDB table for courier tracking"
   value       = module.dynamodb.courier_positions_table_name
 }
 
@@ -47,4 +47,14 @@ output "core_api_service_name" {
 output "routing_service_name" {
   description = "ECS service name for routing-service"
   value       = module.ecs.routing_service_name
+}
+
+output "tracking_service_name" {
+  description = "ECS service name for tracking-service"
+  value       = module.ecs.tracking_service_name
+}
+
+output "order_service_name" {
+  description = "ECS service name for order-service"
+  value       = module.ecs.order_service_name
 }

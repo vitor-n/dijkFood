@@ -79,5 +79,6 @@ class CourierCreationSchema(BaseModel):
     id_vehicle_type: int = Field(alias="ID_vehicle_type")
 
 engine = create_async_engine(settings.POSTGRES_ENDPOINT, echo=True)
+print(settings.POSTGRES_ENDPOINT)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

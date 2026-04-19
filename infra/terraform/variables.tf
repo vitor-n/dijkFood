@@ -125,3 +125,63 @@ variable "task_role_arn" {
   description = "Existing IAM task role ARN for ECS tasks"
   type        = string
 }
+
+variable "tracking_cpu" {
+  description = "CPU units for tracking-service task"
+  type        = number
+  default     = 512
+}
+
+variable "tracking_memory" {
+  description = "Memory (MiB) for tracking-service task"
+  type        = number
+  default     = 1024
+}
+
+variable "tracking_desired" {
+  description = "Desired task count for tracking-service"
+  type        = number
+  default     = 1
+}
+
+variable "tracking_min" {
+  description = "Min task count for tracking-service auto-scaling"
+  type        = number
+  default     = 1
+}
+
+variable "tracking_max" {
+  description = "Max task count for tracking-service auto-scaling"
+  type        = number
+  default     = 2
+}
+
+variable "order_cpu" {
+  description = "CPU units for order-service task"
+  type        = number
+  default     = 512
+}
+
+variable "order_memory" {
+  description = "Memory (MiB) for order-service task"
+  type        = number
+  default     = 1024
+}
+
+variable "order_desired" {
+  description = "Desired task count for order-service"
+  type        = number
+  default     = 1
+}
+
+variable "order_min" {
+  description = "Min task count for order-service auto-scaling"
+  type        = number
+  default     = 1
+}
+
+variable "order_max" {
+  description = "Max task count for order-service auto-scaling"
+  type        = number
+  default     = 2
+}
