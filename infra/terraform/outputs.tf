@@ -58,3 +58,9 @@ output "order_service_name" {
   description = "ECS service name for order-service"
   value       = module.ecs.order_service_name
 }
+
+output "load_tester_instance_id" {
+  description = "ID da EC2 responsável pelo teste de carga"
+  value       = module.load_tester.instance_id
+}
+

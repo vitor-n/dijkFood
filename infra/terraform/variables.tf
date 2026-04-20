@@ -54,6 +54,13 @@ variable "db_multi_az" {
   default     = true
 }
 
+# ---------- EC2 ----------
+variable "load_tester_instance_type" {
+  description = "EC2 instance type to load testing"
+  type        = string
+  default     = "t3.small"
+}
+
 # ---------- ECS ----------
 
 variable "core_api_cpu" {

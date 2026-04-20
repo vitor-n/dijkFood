@@ -28,5 +28,7 @@ routing_desired = 1
 routing_min     = 1
 routing_max     = 2
 
+load_tester_instance_type = "t3.small"
+
 db_username = "dijkfoodadmin"
 db_password = "12345678"

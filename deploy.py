@@ -9,6 +9,7 @@ Comandos:
     python deploy.py all       deploy e, em seguida, destroy (com confirmação ou AUTO_DESTROY).
     python deploy.py plan      terraform plan
     python deploy.py smoke     só health checks no ALB (exige state/terraform output).
+    python deploy.py simulate  executa (na máquina EC2 criada na AWS) a simulação de requests
 
 Variáveis de ambiente:
     DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida) e ao psycopg2
@@ -38,6 +39,7 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any
+import boto3
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 TERRAFORM_DIR = os.path.join("infra", "terraform")
@@ -148,7 +150,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
 
 
 def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
-    print("\n═══ Terraform destroy ═══")
+    print("\n═════════ Destruindo a infraestrutura com Terraform ═════════")
     args = [
         "destroy",
         "-auto-approve",
@@ -157,7 +159,7 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
         *terraform_db_var_args(db_user, db_pass),
     ]
     execute_terraform_command(args)
-    print("  Recursos AWS removidos (conforme o state do Terraform).")
+    print("  Recursos AWS removidos pelo terraform.")
 
 
 def stage_build_push(outputs: dict[str, Any]) -> None:
@@ -202,45 +204,6 @@ def stage_upload_graph(outputs: dict[str, Any]) -> None:
             f"s3://{bucket}/graph/sao_paulo.pkl",
         ]
     )
-
-
-def stage_init_database(outputs: dict[str, Any], db_user: str, db_pass: str) -> None:
-    print("\n═══ Inicialização do schema RDS ═══")
-    import psycopg2
-
-    endpoint = outputs["rds_endpoint"]["value"]
-    retries, delay = 12, 15
-    conn = None
-    for attempt in range(1, retries + 1):
-        try:
-            conn = psycopg2.connect(
-                host=endpoint,
-                port=5432,
-                dbname="dijkfood",
-                user=db_user,
-                password=db_pass,
-                connect_timeout=10,
-            )
-            print(f"  Conectado ao RDS: {endpoint}")
-            break
-        except psycopg2.OperationalError as exc:
-            if attempt == retries:
-                raise
-            print(f"  Tentativa {attempt}/{retries}: {exc} — aguardando {delay}s…")
-            time.sleep(delay)
-
-    schema_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "schema.sql")
-    seed_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "lookup-data.sql")
-
-    assert conn is not None
-    with conn.cursor() as cur:
-        for path in (schema_path, seed_path):
-            with open(path, encoding="utf-8") as f:
-                sql = f.read()
-            cur.execute(sql)
-            print(f"  Executado: {path}")
-    conn.commit()
-    conn.close()
 
 
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
@@ -338,6 +301,66 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
     
     return outputs
 
+def stage_run_load_test(outputs: dict[str, Any]) -> None:
+    print("\n═════════ Rodando simulacao de carga com o EC2 ═════════")
+    
+    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
+    if not instance_id:
+        print("  [Erro] ID da instância EC2 para testes não encontrada nos outputs.")
+        return
+
+    main_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "main.py")
+    simulator_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "simulator.py")
+    req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
+    
+    with open(simulator_path, "r", encoding="utf-8") as f:
+        simulator_content = f.read()
+
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_content = f.read()
+
+    with open(req_path, "r", encoding="utf-8") as f:
+        simulator_requirements = f.read()
+    
+    print("  Enviando scripts diretamente via SSM...")
+    
+    #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
+    commands = [
+        "#!/bin/bash",
+        "cd /home/ec2-user",
+        "sudo dnf install -y python3-pip",
+        "mkdir -p mock_test",
+        "cd mock_test",
+        "cat << \"EOF_REQ\" > requirements.txt",
+        simulator_requirements,
+        "EOF_REQ",
+        "cat << \"EOF_MAIN\" > main.py",
+        main_content,
+        "EOF_MAIN",
+        "cat << \"EOF_SIM\" > simulator.py",
+        simulator_content,
+        "EOF_SIM",
+        "pip3 install -r requirements.txt",
+        "set -a; source /etc/environment; set +a", 
+        "python3 main.py", 
+        "nohup python3 simulator.py > simulation.log 2>&1 &"
+    ]
+    
+    aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    ssm_client = boto3.client("ssm", region_name = aws_region)
+    
+    try:
+        response = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands}
+        )
+
+        cmd_id = response["Command"]["CommandId"]
+        print("  Simulação iniciada! Acompanhe com:")
+        print(f"  aws ssm list-command-invocations --command-id {cmd_id} --region {aws_region} --details")
+    except Exception as exc:
+        print(f"  Falha ao iniciar a simulacao: {exc}")
 
 def print_usage() -> None:
     print(__doc__)
@@ -349,7 +372,7 @@ def main() -> None:
         sys.exit(1)
 
     action = sys.argv[1].strip().lower()
-    valid = ("deploy", "destroy", "all", "plan", "smoke", "help", "-h", "--help")
+    valid = ("deploy", "destroy", "all", "plan", "smoke", "help", "simulate", "-h", "--help")
     if action in ("help", "-h", "--help"):
         print_usage()
         return
@@ -388,6 +411,11 @@ def main() -> None:
         if not _truthy("AUTO_DESTROY"):
             input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)… ")
         stage_terraform_destroy(db_user, db_pass_env)
+        return
+    
+    if action == "simulate":
+        out = tf_output()
+        stage_run_load_test(out)
         return
 
     print_usage()

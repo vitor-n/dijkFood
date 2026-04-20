@@ -87,7 +87,7 @@ async def post_with_retry(
     url: str,
     payload: dict,
     sem: asyncio.Semaphore,
-) -> dict | None:
+):
     """
     POST com semáforo de concorrência e retry exponencial.
     Retorna o body JSON em caso de sucesso, None em caso de falha definitiva.
@@ -122,7 +122,7 @@ async def post_with_retry(
 # Criadores individuais
 # ---------------------------------------------------------------------------
 
-async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int | None:
+async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
     loc = sp_location()
     body = await post_with_retry(client, f"{BASE_URL}/users", {
         "name":  fake.name(),
@@ -136,7 +136,7 @@ async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int 
     return body.get("id_user") or body.get("id")
 
 
-async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int | None:
+async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
     loc = sp_location()
     body = await post_with_retry(client, f"{BASE_URL}/restaurants", {
         "name":           fake.company(),
@@ -163,7 +163,7 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore) -
 #     return body.get("id") if body is not None else None
 
 
-async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore) -> int | None:
+async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore):
     loc = sp_location()
     body = await post_with_retry(client, f"{BASE_URL}/couriers", {
         "name":            fake.name(),

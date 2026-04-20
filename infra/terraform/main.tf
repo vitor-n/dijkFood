@@ -224,3 +224,16 @@ module "ecs" {
   order_min     = var.order_min
   order_max     = var.order_max
 }
+
+
+# ──────────────────────────────────
+#  EC2 - Will host the load tester
+# ──────────────────────────────────
+
+module "load_tester" {
+  source    = "./modules/ec2"
+  vpc_id    = module.networking.vpc_id
+  subnet_id = module.networking.public_subnet_ids[0] 
+  instance_type = var.load_tester_instance_type
+  alb_dns       = module.alb.dns_name
+}
