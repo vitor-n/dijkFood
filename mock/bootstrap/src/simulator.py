@@ -16,11 +16,13 @@ import os
 import logging
 import time
 import statistics
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
-
 import httpx
+
+from dotenv import load_dotenv
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Optional
+from utils import get_random_sp_coordinate
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -35,19 +37,18 @@ log = logging.getLogger("simulator")
 # ---------------------------------------------------------------------------
 # Configuração
 # ---------------------------------------------------------------------------
-
-CRUD_URL      = os.getenv("CRUD_URL",      "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
-ORDER_URL     = os.getenv("ORDER_URL",     "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
-TRACKING_URL  = os.getenv("TRACKING_URL",  "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
-ROUTE_URL     = os.getenv("ROUTE_URL",     "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
-# CRUD_URL      = os.getenv("CRUD_URL",      "http://localhost:8000")
-# ORDER_URL     = os.getenv("ORDER_URL",     "http://localhost:8001")
-# TRACKING_URL  = os.getenv("TRACKING_URL",  "http://localhost:8002")
-# ROUTE_URL     = os.getenv("ROUTE_URL",     "http://localhost:8003")
-
-# Bounding box de São Paulo (fallback)
-SP_LAT_MIN, SP_LAT_MAX = -23.7000, -23.4000
-SP_LON_MIN, SP_LON_MAX = -46.8000, -46.3000
+load_dotenv()
+BASE_URL = os.getenv("BASE_URL", "")
+if BASE_URL == "":
+    CRUD_URL      = os.getenv("CRUD_URL",      "http://localhost:8000")
+    ORDER_URL     = os.getenv("ORDER_URL",     "http://localhost:8001")
+    TRACKING_URL  = os.getenv("TRACKING_URL",  "http://localhost:8002")
+    ROUTE_URL     = os.getenv("ROUTE_URL",     "http://localhost:8003")
+else:
+    CRUD_URL      = BASE_URL
+    ORDER_URL     = BASE_URL
+    TRACKING_URL  = BASE_URL
+    ROUTE_URL     = BASE_URL
 
 class OrderState(int, Enum):
     CONFIRMED        = 1
@@ -60,13 +61,13 @@ class OrderState(int, Enum):
 @dataclass
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "normal")
-    orders_per_second: float = 10.0 # coloquei um pra testar, mas o normal é 10.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 60))
+    orders_per_second: float = 10.0
+    duration_seconds: int = int(os.getenv("SIM_DURATION", 30))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.5)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
     delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
-    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 2.0))
+    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 2))
 
@@ -137,12 +138,6 @@ metrics = Metrics()
 # Helpers HTTP & Lógica de Negócio
 # ---------------------------------------------------------------------------
 
-def sp_location() -> tuple[float, float]:
-    return (
-        round(random.uniform(SP_LAT_MIN, SP_LAT_MAX), 8),
-        round(random.uniform(SP_LON_MIN, SP_LON_MAX), 8),
-    )
-
 async def _request(
     client: httpx.AsyncClient, method: str, base_url: str, path: str, sem: asyncio.Semaphore, config: SimConfig, **kwargs
 ) -> dict | None:
@@ -203,8 +198,8 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     r_task = _request(client, "GET", CRUD_URL, f"/restaurants/{restaurant_id}", sem, config)
     user_data, rest_data = await asyncio.gather(u_task, r_task)
 
-    o_lat, o_lon = (float(user_data["lat"]), float(user_data["lon"])) if user_data else sp_location()
-    d_lat, d_lon = (float(rest_data["lat"]), float(rest_data["lon"])) if rest_data else sp_location()
+    o_lat, o_lon = (float(user_data["lat"]), float(user_data["lon"])) if user_data else get_random_sp_coordinate()
+    d_lat, d_lon = (float(rest_data["lat"]), float(rest_data["lon"])) if rest_data else get_random_sp_coordinate()
 
     # 2. Busca Rota (Restaurante -> Cliente)
     waypoints = await fetch_route(client, sem, config, d_lat, d_lon, o_lat, o_lon)
@@ -217,13 +212,10 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     # 3. Transições com Delays Realistas
     async def advance(state: OrderState):
         await _request(client, "PATCH", ORDER_URL, "/order", sem, config, json={"id_order": order_id, "id_state": state.value})
-
-    # await advance(OrderState.CONFIRMED)
-    # await asyncio.sleep(random.uniform(config.delay_preparing_min, config.delay_preparing_max))
     
+    await asyncio.sleep(random.uniform(config.delay_preparing_min, config.delay_preparing_max))
     await advance(OrderState.PREPARING)
     await asyncio.sleep(random.uniform(config.delay_ready_min, config.delay_ready_max))
-    
     await advance(OrderState.READY_FOR_PICKUP)
     await advance(OrderState.PICKED_UP)
     await advance(OrderState.IN_TRANSIT)
@@ -245,11 +237,33 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
 # ---------------------------------------------------------------------------
 
 async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
-    u_body = await _request(client, "GET", CRUD_URL, "/users?itemsPerPage=5000", sem, config)
-    r_body = await _request(client, "GET", CRUD_URL, "/restaurants?itemsPerPage=500", sem, config)
+    users = []
+    rests = []
+    
+    page = 1
+    while True:
+        u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
+        if u_body:
+            users.extend([u["id_user"] for u in u_body.get("data", [])])
+            if u_body['has_more']:
+                page += 1
+            else:
+                break
+        else:
+            break
 
-    users = [u["id_user"] for u in (u_body.get("data") if u_body else [])]
-    rests = [r["id_restaurant"] for r in (r_body.get("data") if r_body else [])]
+    page = 1
+    while True:
+        r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)    
+        if r_body:
+            rests.extend([r["id_restaurant"] for r in r_body.get("data", [])])
+            if r_body['has_more']:
+                page += 1
+            else:
+                break
+        else:
+            break                
+
     return users, rests
 
 async def order_emitter(client, users, restaurants, config):

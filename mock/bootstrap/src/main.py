@@ -10,10 +10,11 @@ import random
 import os
 import logging
 import time
-from dataclasses import dataclass, field
-
 import httpx
+from dataclasses import dataclass, field
 from faker import Faker
+from dotenv import load_dotenv
+from utils import get_random_sp_coordinate, post_with_retry
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -26,30 +27,30 @@ logging.basicConfig(
 log = logging.getLogger("bootstrap")
 
 # ---------------------------------------------------------------------------
-# Configuração via env
+# Configuração
 # ---------------------------------------------------------------------------
+load_dotenv()
+# Url
+BASE_URL            = os.getenv("BASE_URL", "http://localhost:8000")
 
-BASE_URL            = os.getenv("BASE_URL", "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
-NUM_USERS           = int(os.getenv("NUM_USERS", 2000))
-NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 50))
+# Quantidades
+NUM_USERS           = int(os.getenv("NUM_USERS", 1000))
+NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 500))
 NUM_COURIERS        = int(os.getenv("NUM_COURIERS", NUM_USERS * 3))
 # ITEMS_PER_RESTAURANT = int(os.getenv("ITEMS_PER_RESTAURANT", 8))
+CUISINE_TYPE_IDS = list(range(1, 11))
+VEHICLE_TYPE_IDS = list(range(1, 5))
 
-# Controle de concorrência — quantas requisições simultâneas por tipo de entidade
+# Controle de concorrência: quantas requisições simultâneas por tipo de entidade
 CONCURRENCY         = int(os.getenv("BOOTSTRAP_CONCURRENCY", 50))
 
 # Retry
-MAX_RETRIES         = int(os.getenv("BOOTSTRAP_MAX_RETRIES", 3))
-RETRY_BASE_DELAY    = float(os.getenv("BOOTSTRAP_RETRY_BASE_DELAY", 0.5))  # segundos
+config_retry = {
+    "MAX_RETRIES": int(os.getenv("BOOTSTRAP_MAX_RETRIES", 3)),
+    "RETRY_BASE_DELAY": float(os.getenv("BOOTSTRAP_RETRY_BASE_DELAY", 0.5))  # segundos
+}
 
 fake = Faker("pt_BR")
-
-# Bounding box de São Paulo
-SP_LAT_MIN, SP_LAT_MAX = -23.7000, -23.4000
-SP_LON_MIN, SP_LON_MAX = -46.8000, -46.3000
-
-CUISINE_TYPE_IDS = list(range(1, 11))
-VEHICLE_TYPE_IDS = list(range(1, 5))
 
 # ---------------------------------------------------------------------------
 # Resultado agregado
@@ -72,79 +73,32 @@ class BatchResult:
         )
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def sp_location() -> dict:
-    return {
-        "lat": round(random.uniform(SP_LAT_MIN, SP_LAT_MAX), 8),
-        "lon": round(random.uniform(SP_LON_MIN, SP_LON_MAX), 8),
-    }
-
-
-async def post_with_retry(
-    client: httpx.AsyncClient,
-    url: str,
-    payload: dict,
-    sem: asyncio.Semaphore,
-):
-    """
-    POST com semáforo de concorrência e retry exponencial.
-    Retorna o body JSON em caso de sucesso, None em caso de falha definitiva.
-    """
-    for attempt in range(1, MAX_RETRIES + 1):
-        async with sem:
-            try:
-                resp = await client.post(url, json=payload)
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                log.debug(f"Tentativa {attempt} — erro de rede em {url}: {exc}")
-                resp = None
-
-        if resp is not None and resp.status_code in (200, 201):
-            try:
-                return resp.json()
-            except Exception:
-                return {}
-
-        # Só faz retry em falhas transitórias
-        if resp is not None and resp.status_code < 500:
-            log.debug(f"Falha permanente {resp.status_code} em {url}")
-            return None
-
-        if attempt < MAX_RETRIES:
-            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 0.1)
-            await asyncio.sleep(delay)
-
-    log.warning(f"Esgotadas {MAX_RETRIES} tentativas para {url}")
-    return None
-
-# ---------------------------------------------------------------------------
 # Criadores individuais
 # ---------------------------------------------------------------------------
 
 async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = sp_location()
+    loc = get_random_sp_coordinate()
     body = await post_with_retry(client, f"{BASE_URL}/users", {
         "name":  fake.name(),
         "email": fake.email(),
         "phone": fake.phone_number()[:15],
         "lat":   loc["lat"],
         "lon":   loc["lon"],
-    }, sem)
+    }, sem, config_retry, log)
     if body is None:
         return None
     return body.get("id_user") or body.get("id")
 
 
 async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = sp_location()
+    loc = get_random_sp_coordinate()
     body = await post_with_retry(client, f"{BASE_URL}/restaurants", {
         "name":           fake.company(),
         "lat":            loc["lat"],
         "lon":            loc["lon"],
         "H3_index":       random.randint(1, 1000),
         "ID_cuisine_type": random.choice(CUISINE_TYPE_IDS),
-    }, sem)
+    }, sem, config_retry, log)
     if body is None:
         return None
     return body.get("id_restaurant") or body.get("id")
@@ -159,18 +113,18 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
 #         "name":          fake.word().capitalize(),
 #         "price":         round(random.uniform(10, 100), 2),
 #         "ID_restaurant": restaurant_id,
-#     }, sem)
+#     }, sem, config_retry, log)
 #     return body.get("id") if body is not None else None
 
 
 async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = sp_location()
+    loc = get_random_sp_coordinate()
     body = await post_with_retry(client, f"{BASE_URL}/couriers", {
         "name":            fake.name(),
         "ID_vehicle_type": random.choice(VEHICLE_TYPE_IDS),
         "lat":             loc["lat"],
         "lon":             loc["lon"],
-    }, sem)
+    }, sem, config_retry, log)
     if body is None:
         return None
     return body.get("id_courier") or body.get("id")
