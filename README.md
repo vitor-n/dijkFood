@@ -1,6 +1,12 @@
 # dijkFood
 
+
+
 ## Instruções de execução
+
+> **⚠️ ATENÇÃO:** O script e a infraestrutura foram pensados para serem executados
+em um Learner Lab, e dependem da Role de `LabRole` do IAM. O deploy
+potencialmente não funcionará fora do ambiente Learner Lab.
 
 ### Pré-requisitos
 
@@ -49,8 +55,18 @@ $ python deploy.py deploy
 ```
 
 O script irá começar a subir a infraestrutura em sua AWS, levando em torno de
-25 minutos.
+25 minutos. Quando esse processo terminar, o script irá imprimir na tela o link
+do ALB para acesso da API. É possível acessar o endpoint `docs/` com o navegador
+para explorar os endpoints e entidades do serviço `core-api`.
 
-> **⚠️ ATENÇÃO:** O script e a infraestrutura foram pensados para serem executados
-em um Learner Lab, e dependem da Role de `LabRole` do IAM. O deploy
-potencialmente não funcionará fora do ambiente Learner Lab.
+Após isso, o script irá enviar a simulação para ser feita em uma instância EC2
+dedicada, por meio do SSM Agents. Os logs da execução poderão ser acompanhados
+no console da AWS via CloudWatch (o link para acesso direto no console d AWS
+será impresso no terminal), de forma que a saída do script não fique poluída
+com eles.
+
+Após o término da simulação, os recursos da AWS serão automaticamente destruídos,
+deixando o ambiente assim como foi encontrado anteriormente. Esse processo
+poderá **falhar** caso alguma alteração seja feita no console da AWS durante a
+execução do script, então é importante que os recursos não sejam manipulados
+via console enquanto o script estiver em execução.

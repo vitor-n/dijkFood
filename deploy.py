@@ -3,31 +3,23 @@
 DijkFood — deploy automatizado (Terraform + ECR + RDS + ECS)
 
 Comandos:
-    python deploy.py deploy    Aplica infra, build/push das imagens, schema RDS,
-                               upload do grafo (S3), force deploy ECS, smoke test opcional.
-    python deploy.py destroy   terraform destroy (exige as mesmas credenciais de DB que o apply).
-    python deploy.py all       deploy e, em seguida, destroy (com confirmação ou AUTO_DESTROY).
-    python deploy.py plan      terraform plan
-    python deploy.py smoke     só health checks no ALB (exige state/terraform output).
-    python deploy.py simulate  executa (na máquina EC2 criada na AWS) a simulação de requests
+    python deploy.py deploy    Aplica a infraestrutura, faz build/push das imagens, força o deploy ECS e faz smoke test.
+    python deploy.py destroy   Destrói a infraestrutura com o Terraform (exige as mesmas credenciais de DB que o apply).
+    python deploy.py all       Faz deploy, executa testes e destrói a infraestrutura (com confirmação ou AUTO_DESTROY).
+    python deploy.py plan      Apenas executa o `terraform plan` para análise da infraestrutura
+    python deploy.py smoke     Faz só health checks no ALB (exige state/terraform output).
+    python deploy.py simulate  Executa (na máquina EC2 criada na AWS) a simulação de requests
 
 Variáveis de ambiente:
-    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida) e ao psycopg2
-                        para schema/seed. Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode
-                        ficar vazia se estiver só no TF_VAR_FILE.
+    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida). Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode ficar vazia se estiver só no TF_VAR_FILE.
     DB_USERNAME         Usuário RDS (default: dijkfood_admin).
-    TF_VAR_execution_role_arn Deve ser preenchida com a role do arn existente no lab
-    TF_VAR_task_role_arn Deve ser preenchida com a role do arn existente no lab
     TF_VAR_FILE         .tfvars (ex.: dev.tfvars), buscado na raiz do repo e em infra/terraform.
-    GRAPH_FILE_PATH     sao_paulo.pkl (default: services/routing-service/data/sao_paulo.pkl).
-    SKIP_DB_INIT        Se "1"/"true", não aplica schema.sql no RDS (resto do deploy segue).
-    SKIP_SMOKE_TEST     Se "1"/"true", não roda smoke HTTP no ALB após o deploy.
     AUTO_DESTROY        Se "1"/"true", comando `all` destrói sem prompt (CI).
     SKIP_DESTROY        Se "1"/"true", comando `all` não executa destroy após o deploy.
 
 Credenciais AWS: ~/.aws/credentials (não commitar segredos no repositório).
 
-Dependências Python: pip install -r requirements.txt (boto3, psycopg2-binary).
+Dependências Python: pip install -r requirements.txt (boto3, psycopg2-binary, python_dotenv).
 """
 from __future__ import annotations
 
@@ -45,25 +37,6 @@ from typing import Any
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 TERRAFORM_DIR = os.path.join("infra", "terraform")
 TF_ABS = os.path.join(PROJECT_ROOT, TERRAFORM_DIR)
-
-# Ordem estável: deve coincidir com as chaves em module.ecr / outputs ECS
-SERVICE_IMAGES: list[tuple[str, str]] = [
-    ("core-api", os.path.join("services", "core-api", "Dockerfile")),
-    ("routing-service", os.path.join("services", "routing-service", "Dockerfile")),
-    ("tracking-service", os.path.join("services", "tracking-service", "Dockerfile")),
-    ("order-service", os.path.join("services", "order-service", "Dockerfile")),
-]
-
-ECS_SERVICE_OUTPUT_KEYS = [
-    "core_api_service_name",
-    "routing_service_name",
-    "tracking_service_name",
-    "order_service_name",
-]
-
-DEFAULT_GRAPH = os.path.join(
-    PROJECT_ROOT, "services", "routing-service", "data", "sao_paulo.pkl"
-)
 
 def inject_lab_role_arn():
     try:
@@ -105,8 +78,6 @@ def terraform_var_file_args() -> list[str]:
     raise FileNotFoundError(
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
-
-
 
 def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
     """Só injeta -var de DB se a senha vier no ambiente (evita sobrescrever tfvars com vazio)."""
@@ -200,25 +171,6 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         run_command(["docker", "build", "-f", dockerfile_path, "-t", tag, "./"], cwd=PROJECT_ROOT)
         run_command(["docker", "push", tag], cwd=PROJECT_ROOT)
 
-
-def stage_upload_graph(outputs: dict[str, Any]) -> None:
-    print("\n═══ Upload do grafo (S3) ═══")
-    graph_path = os.environ.get("GRAPH_FILE_PATH", DEFAULT_GRAPH)
-    if not os.path.isfile(graph_path):
-        print(f"  [SKIP] Arquivo de grafo não encontrado: {graph_path}")
-        return
-    bucket = outputs["graph_bucket_name"]["value"]
-    run_command(
-        [
-            "aws",
-            "s3",
-            "cp",
-            graph_path,
-            f"s3://{bucket}/graph/sao_paulo.pkl",
-        ]
-    )
-
-
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     print("\n═══ Novo deployment ECS (todas as services) ═══")
     region = outputs["aws_region"]["value"]
@@ -238,7 +190,7 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
              "--cluster", cluster,
              "--service", svc,
              "--force-new-deployment",
-             "--region", outputs["aws_region"]["value"]],
+             "--region", region],
             capture=True)
         print(f"  Pedido para redeploy do servico {svc} feito")
 
@@ -248,7 +200,7 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
         run_command(["aws", "ecs", "wait", "services-stable",
              "--cluster", cluster,
              "--services", svc,
-             "--region", outputs["aws_region"]["value"]])
+             "--region", region])
         print(f"  {svc} está estável")
 
     alb_dns = outputs["alb_dns_name"]["value"]
@@ -400,7 +352,7 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
                 continue
 
     except Exception as exc:
-        print(f"  Falha ao iniciar o processo unificado: {exc}")
+        print(f"  Falha ao iniciar/monitorar a simulação: {exc}")
 
 def print_usage() -> None:
     print(__doc__)
@@ -444,20 +396,21 @@ def main() -> None:
     if action == "deploy":
         run_full_deploy(db_user, db_pass_env)
         return
-
-    if action == "all":
-        run_full_deploy(db_user, db_pass_env)
-        if _truthy("SKIP_DESTROY"):
-            print("\nSKIP_DESTROY=1 — não executando destroy.")
-            return
-        if not _truthy("AUTO_DESTROY"):
-            input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)… ")
-        stage_terraform_destroy(db_user, db_pass_env)
-        return
     
     if action == "simulate":
         out = tf_output()
         stage_run_load_test(out)
+        return
+
+    if action == "all":
+        outputs = run_full_deploy(db_user, db_pass_env)
+        stage_run_load_test(outputs)
+        if _truthy("SKIP_DESTROY"):
+            print("\nSKIP_DESTROY=1 — não executando destroy.")
+            return
+        if not _truthy("AUTO_DESTROY"):
+            input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)... ")
+        stage_terraform_destroy(db_user, db_pass_env)
         return
 
     print_usage()
