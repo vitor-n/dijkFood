@@ -319,7 +319,7 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
-        print("  [Erro] ID da instância EC2 para testes não encontrada nos outputs.")
+        print("[Erro] ID da instância EC2 para testes não encontrada nos outputs.")
         return
 
     main_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "main.py")
@@ -328,18 +328,17 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     
     with open(simulator_path, "r", encoding="utf-8") as f:
         simulator_content = f.read()
-
     with open(main_path, "r", encoding="utf-8") as f:
         main_content = f.read()
-
     with open(req_path, "r", encoding="utf-8") as f:
         simulator_requirements = f.read()
     
-    print("  Enviando scripts diretamente via SSM...")
+    print("Enviando scripts de simulação para o EC2 via SSM...")
     
     #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
     commands = [
         "#!/bin/bash",
+        "set -e",
         "cd /home/ec2-user",
         "sudo dnf install -y python3-pip",
         "mkdir -p mock_test",
@@ -354,11 +353,15 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         simulator_content,
         "EOF_SIM",
         "pip3 install -r requirements.txt",
-        "set -a; source /etc/environment; set +a", 
-        "python3 main.py", 
-        "nohup python3 simulator.py > simulation.log 2>&1 &"
+        "set -a; source /etc/environment; set +a",
+        "echo \"═════════ Iniciando Populate ═════════\"",
+        "python3 -u main.py",
+        "echo \"═════════ Iniciando Simulacao ═════════\"",
+        "python3 -u simulator.py"
     ]
-    
+
+    log_group_name = "/aws/ssm/dijkfood-full-simulation"
+
     aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
     ssm_client = boto3.client("ssm", region_name = aws_region)
     
@@ -366,14 +369,38 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         response = ssm_client.send_command(
             InstanceIds=[instance_id],
             DocumentName="AWS-RunShellScript",
-            Parameters={"commands": commands}
+            Parameters={"commands": commands},
+            CloudWatchOutputConfig={
+                "CloudWatchLogGroupName": log_group_name,
+                "CloudWatchOutputEnabled": True
+            }
         )
-
         cmd_id = response["Command"]["CommandId"]
-        print("  Simulação iniciada! Acompanhe com:")
-        print(f"  aws ssm list-command-invocations --command-id {cmd_id} --region {aws_region} --details")
+        
+        cw_group_encoded = log_group_name.replace("/", "$252F")
+        cw_url = f"https://{aws_region}.console.aws.amazon.com/cloudwatch/home?region={aws_region}#logsV2:log-groups/log-group/{cw_group_encoded}"
+        
+        print(f"Simulação Iniciada na EC2 (id {cmd_id})")
+        print("É possível acompanhar os outputs da simulação pelo link:")
+        print(f"{cw_url}\n")
+
+        while True:
+            time.sleep(10)
+            print(".", end = "")
+            try:
+                inv = ssm_client.get_command_invocation(
+                    CommandId = cmd_id,
+                    InstanceId = instance_id
+                )
+                status = inv["Status"]
+                if status not in ("Pending", "InProgress", "Delayed"):
+                    print("\nProcesso da simulação finalizado com status: " + status)
+                    break
+            except ssm_client.exceptions.InvocationDoesNotExist:
+                continue
+
     except Exception as exc:
-        print(f"  Falha ao iniciar a simulacao: {exc}")
+        print(f"  Falha ao iniciar o processo unificado: {exc}")
 
 def print_usage() -> None:
     print(__doc__)

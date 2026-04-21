@@ -11,6 +11,7 @@ import os
 import logging
 import time
 from dataclasses import dataclass, field
+import sys
 
 import httpx
 from faker import Faker
@@ -21,7 +22,7 @@ from faker import Faker
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger("bootstrap")
 
@@ -29,7 +30,7 @@ log = logging.getLogger("bootstrap")
 # Configuração via env
 # ---------------------------------------------------------------------------
 
-BASE_URL            = os.getenv("BASE_URL", "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
+BASE_URL            = os.getenv("CRUD_URL", "http://dijkfood-g3-dev-alb-1146657652.us-east-1.elb.amazonaws.com")
 NUM_USERS           = int(os.getenv("NUM_USERS", 2000))
 NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 50))
 NUM_COURIERS        = int(os.getenv("NUM_COURIERS", NUM_USERS * 3))
@@ -182,16 +183,18 @@ async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore):
 async def ingest_batch(
     label: str,
     coroutines,
-    log_every: int = 100,
+    log_every: int = 0,
 ) -> BatchResult:
     """
     Executa uma lista de corrotinas e agrega os resultados.
-    Loga progresso a cada `log_every` itens concluídos.
+    Loga progresso baseado no parametro log_every (se 0, usa 50% do total).
     """
     result = BatchResult(entity=label)
     total = len(coroutines)
     done = 0
     t0 = time.perf_counter()
+
+    step = log_every if log_every > 0 else max(1, total // 20)
 
     for coro in asyncio.as_completed(coroutines):
         entity_id = await coro
@@ -201,10 +204,10 @@ async def ingest_batch(
         else:
             result.failed += 1
 
-        if done % log_every == 0 or done == total:
+        if done % step == 0 or done == total:
             elapsed = time.perf_counter() - t0
             rps = done / elapsed if elapsed > 0 else 0
-            log.info(f"  [{label}] {done}/{total}  ({rps:.1f} req/s)")
+            print(f"  [{label}] {done}/{total}  ({rps:.1f} req/s)")
 
     return result
 
@@ -285,4 +288,5 @@ async def run_bootstrap() -> dict:
 
 
 if __name__ == "__main__":
+    print("Iniciando populate")
     asyncio.run(run_bootstrap())

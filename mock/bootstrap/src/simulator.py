@@ -145,7 +145,7 @@ def sp_location() -> tuple[float, float]:
 
 async def _request(
     client: httpx.AsyncClient, method: str, base_url: str, path: str, sem: asyncio.Semaphore, config: SimConfig, **kwargs
-) -> dict | None:
+):
     """Executa requisição com Retry, medindo latência exata."""
     url = f"{base_url}{path}"
     
