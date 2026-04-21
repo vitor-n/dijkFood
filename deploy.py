@@ -31,6 +31,8 @@ Dependências Python: pip install -r requirements.txt (boto3, psycopg2-binary).
 """
 from __future__ import annotations
 
+import boto3
+from dotenv import load_dotenv
 import json
 import os
 import subprocess
@@ -39,7 +41,6 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any
-import boto3
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 TERRAFORM_DIR = os.path.join("infra", "terraform")
@@ -64,6 +65,17 @@ DEFAULT_GRAPH = os.path.join(
     PROJECT_ROOT, "services", "routing-service", "data", "sao_paulo.pkl"
 )
 
+def inject_lab_role_arn():
+    try:
+        iam_client = boto3.client("iam")
+        response = iam_client.get_role(RoleName = "LabRole")
+        arn = response["Role"]["Arn"]
+        os.environ["TF_VAR_execution_role_arn"] = arn
+        os.environ["TF_VAR_task_role_arn"] = arn
+        print(f"Usando LabRole {arn} encontrada automaticamente.")
+    except Exception as e:
+        print(f"Erro ao acessar a LabRole: {e}")
+        raise
 
 def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
@@ -93,6 +105,7 @@ def terraform_var_file_args() -> list[str]:
     raise FileNotFoundError(
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
+
 
 
 def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
@@ -382,8 +395,10 @@ def main() -> None:
         print_usage()
         sys.exit(1)
 
+    load_dotenv()
     db_user = os.environ.get("DB_USERNAME", "dijkfood_admin")
-    db_pass_env = os.environ.get("DB_PASSWORD", "").strip() or None
+    db_pass_env = os.environ.get("DB_PASSWORD", "12345678").strip() or None
+    inject_lab_role_arn()
 
     if action == "plan":
         stage_terraform_init()
