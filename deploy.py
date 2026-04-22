@@ -3,34 +3,28 @@
 DijkFood — deploy automatizado (Terraform + ECR + RDS + ECS)
 
 Comandos:
-    python deploy.py deploy    Aplica infra, build/push das imagens, schema RDS,
-                               upload do grafo (S3), force deploy ECS, smoke test opcional.
-    python deploy.py destroy   terraform destroy (exige as mesmas credenciais de DB que o apply).
-    python deploy.py all       deploy e, em seguida, destroy (com confirmação ou AUTO_DESTROY).
-    python deploy.py plan      terraform plan
-    python deploy.py smoke     só health checks no ALB (exige state/terraform output).
-    python deploy.py simulate  executa (na máquina EC2 criada na AWS) a simulação de requests
+    python deploy.py deploy    Aplica a infraestrutura, faz build/push das imagens, força o deploy ECS e faz smoke test.
+    python deploy.py destroy   Destrói a infraestrutura com o Terraform (exige as mesmas credenciais de DB que o apply).
+    python deploy.py all       Faz deploy, executa testes e destrói a infraestrutura (com confirmação ou AUTO_DESTROY).
+    python deploy.py plan      Apenas executa o `terraform plan` para análise da infraestrutura
+    python deploy.py smoke     Faz só health checks no ALB (exige state/terraform output).
+    python deploy.py simulate  Executa (na máquina EC2 criada na AWS) a simulação de requests
 
 Variáveis de ambiente:
-    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida) e ao psycopg2
-                        para schema/seed. Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode
-                        ficar vazia se estiver só no TF_VAR_FILE.
+    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida). Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode ficar vazia se estiver só no TF_VAR_FILE.
     DB_USERNAME         Usuário RDS (default: dijkfood_admin).
-    TF_VAR_execution_role_arn Deve ser preenchida com a role do arn existente no lab
-    TF_VAR_task_role_arn Deve ser preenchida com a role do arn existente no lab
     TF_VAR_FILE         .tfvars (ex.: dev.tfvars), buscado na raiz do repo e em infra/terraform.
-    GRAPH_FILE_PATH     sao_paulo.pkl (default: services/routing-service/data/sao_paulo.pkl).
-    SKIP_DB_INIT        Se "1"/"true", não aplica schema.sql no RDS (resto do deploy segue).
-    SKIP_SMOKE_TEST     Se "1"/"true", não roda smoke HTTP no ALB após o deploy.
     AUTO_DESTROY        Se "1"/"true", comando `all` destrói sem prompt (CI).
     SKIP_DESTROY        Se "1"/"true", comando `all` não executa destroy após o deploy.
 
 Credenciais AWS: ~/.aws/credentials (não commitar segredos no repositório).
 
-Dependências Python: pip install -r requirements.txt (boto3, psycopg2-binary).
+Dependências Python: pip install -r requirements.txt (boto3, psycopg2-binary, python_dotenv).
 """
 from __future__ import annotations
 
+import boto3
+from dotenv import load_dotenv
 import json
 import os
 import subprocess
@@ -39,31 +33,22 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any
-import boto3
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 TERRAFORM_DIR = os.path.join("infra", "terraform")
 TF_ABS = os.path.join(PROJECT_ROOT, TERRAFORM_DIR)
 
-# Ordem estável: deve coincidir com as chaves em module.ecr / outputs ECS
-SERVICE_IMAGES: list[tuple[str, str]] = [
-    ("core-api", os.path.join("services", "core-api", "Dockerfile")),
-    ("routing-service", os.path.join("services", "routing-service", "Dockerfile")),
-    ("tracking-service", os.path.join("services", "tracking-service", "Dockerfile")),
-    ("order-service", os.path.join("services", "order-service", "Dockerfile")),
-]
-
-ECS_SERVICE_OUTPUT_KEYS = [
-    "core_api_service_name",
-    "routing_service_name",
-    "tracking_service_name",
-    "order_service_name",
-]
-
-DEFAULT_GRAPH = os.path.join(
-    PROJECT_ROOT, "services", "routing-service", "data", "sao_paulo.pkl"
-)
-
+def inject_lab_role_arn():
+    try:
+        iam_client = boto3.client("iam")
+        response = iam_client.get_role(RoleName = "LabRole")
+        arn = response["Role"]["Arn"]
+        os.environ["TF_VAR_execution_role_arn"] = arn
+        os.environ["TF_VAR_task_role_arn"] = arn
+        print(f"Usando LabRole {arn} encontrada automaticamente.")
+    except Exception as e:
+        print(f"Erro ao acessar a LabRole: {e}")
+        raise
 
 def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
@@ -93,7 +78,6 @@ def terraform_var_file_args() -> list[str]:
     raise FileNotFoundError(
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
-
 
 def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
     """Só injeta -var de DB se a senha vier no ambiente (evita sobrescrever tfvars com vazio)."""
@@ -187,25 +171,6 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         run_command(["docker", "build", "-f", dockerfile_path, "-t", tag, "./"], cwd=PROJECT_ROOT)
         run_command(["docker", "push", tag], cwd=PROJECT_ROOT)
 
-
-def stage_upload_graph(outputs: dict[str, Any]) -> None:
-    print("\n═══ Upload do grafo (S3) ═══")
-    graph_path = os.environ.get("GRAPH_FILE_PATH", DEFAULT_GRAPH)
-    if not os.path.isfile(graph_path):
-        print(f"  [SKIP] Arquivo de grafo não encontrado: {graph_path}")
-        return
-    bucket = outputs["graph_bucket_name"]["value"]
-    run_command(
-        [
-            "aws",
-            "s3",
-            "cp",
-            graph_path,
-            f"s3://{bucket}/graph/sao_paulo.pkl",
-        ]
-    )
-
-
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     print("\n═══ Novo deployment ECS (todas as services) ═══")
     region = outputs["aws_region"]["value"]
@@ -225,7 +190,7 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
              "--cluster", cluster,
              "--service", svc,
              "--force-new-deployment",
-             "--region", outputs["aws_region"]["value"]],
+             "--region", region],
             capture=True)
         print(f"  Pedido para redeploy do servico {svc} feito")
 
@@ -235,7 +200,7 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
         run_command(["aws", "ecs", "wait", "services-stable",
              "--cluster", cluster,
              "--services", svc,
-             "--region", outputs["aws_region"]["value"]])
+             "--region", region])
         print(f"  {svc} está estável")
 
     alb_dns = outputs["alb_dns_name"]["value"]
@@ -306,27 +271,29 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
-        print("  [Erro] ID da instância EC2 para testes não encontrada nos outputs.")
+        print("[Erro] ID da instância EC2 para testes não encontrada nos outputs.")
         return
 
     main_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "main.py")
     simulator_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "simulator.py")
+    utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
     
     with open(simulator_path, "r", encoding="utf-8") as f:
         simulator_content = f.read()
-
     with open(main_path, "r", encoding="utf-8") as f:
         main_content = f.read()
-
+    with open(utils_path, "r", encoding="utf-8") as f:
+        utils_content = f.read()
     with open(req_path, "r", encoding="utf-8") as f:
         simulator_requirements = f.read()
     
-    print("  Enviando scripts diretamente via SSM...")
+    print("Enviando scripts de simulação para o EC2 via SSM...")
     
     #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
     commands = [
         "#!/bin/bash",
+        "set -e",
         "cd /home/ec2-user",
         "sudo dnf install -y python3-pip",
         "mkdir -p mock_test",
@@ -334,6 +301,9 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "cat << \"EOF_REQ\" > requirements.txt",
         simulator_requirements,
         "EOF_REQ",
+        "cat << \"EOF_UTILS\" > utils.py",
+        utils_content,
+        "EOF_UTILS",
         "cat << \"EOF_MAIN\" > main.py",
         main_content,
         "EOF_MAIN",
@@ -341,11 +311,15 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         simulator_content,
         "EOF_SIM",
         "pip3 install -r requirements.txt",
-        "set -a; source /etc/environment; set +a", 
-        "python3 main.py", 
-        "nohup python3 simulator.py > simulation.log 2>&1 &"
+        "set -a; source /etc/environment; set +a",
+        "echo \"═════════ Iniciando Populate ═════════\"",
+        "python3 -u main.py",
+        "echo \"═════════ Iniciando Simulacao ═════════\"",
+        "python3 -u simulator.py"
     ]
-    
+
+    log_group_name = "/aws/ssm/dijkfood-full-simulation"
+
     aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
     ssm_client = boto3.client("ssm", region_name = aws_region)
     
@@ -353,14 +327,38 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         response = ssm_client.send_command(
             InstanceIds=[instance_id],
             DocumentName="AWS-RunShellScript",
-            Parameters={"commands": commands}
+            Parameters={"commands": commands},
+            CloudWatchOutputConfig={
+                "CloudWatchLogGroupName": log_group_name,
+                "CloudWatchOutputEnabled": True
+            }
         )
-
         cmd_id = response["Command"]["CommandId"]
-        print("  Simulação iniciada! Acompanhe com:")
-        print(f"  aws ssm list-command-invocations --command-id {cmd_id} --region {aws_region} --details")
+        
+        cw_group_encoded = log_group_name.replace("/", "$252F")
+        cw_url = f"https://{aws_region}.console.aws.amazon.com/cloudwatch/home?region={aws_region}#logsV2:log-groups/log-group/{cw_group_encoded}"
+        
+        print(f"Simulação Iniciada na EC2 (id {cmd_id})")
+        print("É possível acompanhar os outputs da simulação pelo link:")
+        print(f"{cw_url}\n")
+
+        while True:
+            time.sleep(10)
+            print(".", end = "")
+            try:
+                inv = ssm_client.get_command_invocation(
+                    CommandId = cmd_id,
+                    InstanceId = instance_id
+                )
+                status = inv["Status"]
+                if status not in ("Pending", "InProgress", "Delayed"):
+                    print("\nProcesso da simulação finalizado com status: " + status)
+                    break
+            except ssm_client.exceptions.InvocationDoesNotExist:
+                continue
+
     except Exception as exc:
-        print(f"  Falha ao iniciar a simulacao: {exc}")
+        print(f"  Falha ao iniciar/monitorar a simulação: {exc}")
 
 def print_usage() -> None:
     print(__doc__)
@@ -382,8 +380,10 @@ def main() -> None:
         print_usage()
         sys.exit(1)
 
+    load_dotenv()
     db_user = os.environ.get("DB_USERNAME", "dijkfood_admin")
-    db_pass_env = os.environ.get("DB_PASSWORD", "").strip() or None
+    db_pass_env = os.environ.get("DB_PASSWORD", "12345678").strip() or None
+    inject_lab_role_arn()
 
     if action == "plan":
         stage_terraform_init()
@@ -402,20 +402,21 @@ def main() -> None:
     if action == "deploy":
         run_full_deploy(db_user, db_pass_env)
         return
-
-    if action == "all":
-        run_full_deploy(db_user, db_pass_env)
-        if _truthy("SKIP_DESTROY"):
-            print("\nSKIP_DESTROY=1 — não executando destroy.")
-            return
-        if not _truthy("AUTO_DESTROY"):
-            input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)… ")
-        stage_terraform_destroy(db_user, db_pass_env)
-        return
     
     if action == "simulate":
         out = tf_output()
         stage_run_load_test(out)
+        return
+
+    if action == "all":
+        outputs = run_full_deploy(db_user, db_pass_env)
+        stage_run_load_test(outputs)
+        if _truthy("SKIP_DESTROY"):
+            print("\nSKIP_DESTROY=1 — não executando destroy.")
+            return
+        if not _truthy("AUTO_DESTROY"):
+            input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)... ")
+        stage_terraform_destroy(db_user, db_pass_env)
         return
 
     print_usage()
