@@ -60,7 +60,7 @@ class OrderState(int, Enum):
 
 @dataclass
 class SimConfig:
-    scenario: str = os.getenv("SCENARIO", "normal")
+    scenario: str = os.getenv("SCENARIO", "testing")
     orders_per_second: float = 0.0
     duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
@@ -73,7 +73,7 @@ class SimConfig:
 
     def __post_init__(self):
         scenarios_mapping = {
-            "testing": 10.0,
+            "testing": 5.0,
             "normal": 10.0,
             "peak": 50.0,
             "event": 200.0
@@ -88,9 +88,11 @@ class SimConfig:
 class Metrics:
     records: list = field(default_factory=list)
     orders_created: int = 0
+    orders_not_created: int = 0
     orders_completed: int = 0
     orders_failed: int = 0
     errors: int = 0
+    max_simultaneous_orders: int = 0
 
     def record_latency(self, endpoint: str, method: str, latency_ms: float, status: int):
         self.records.append({
@@ -104,6 +106,8 @@ class Metrics:
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
+        print(f"Pedidos não criados: {self.orders_not_created}")
+        print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
         print(f"Erros de rede/timeout: {self.errors}")
         print("=" * 80)
         
@@ -197,7 +201,8 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     # 1. Criação
     body = await _request(client, "POST", ORDER_URL, "/order", sem, config, json={"id_user": user_id, "id_restaurant": restaurant_id})
     if not body or "id_order" not in body:
-        metrics.orders_failed += 1
+        metrics.orders_not_created += 1
+        log.warning(f"Falha ao criar pedido para usuário {user_id} e restaurante {restaurant_id}.")
         return
 
     order_id = body["id_order"]
@@ -212,37 +217,61 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     if rest_data:
         o_lat, o_lon = (float(rest_data["lat"]), float(rest_data["lon"]))
     else:
-        aux = get_random_sp_coordinate()
-        o_lat, o_lon = (float(aux["lat"]), float(aux["lon"]))
-
+        metrics.orders_failed += 1
+        log.warning(f"Coordenadas do restaurante {restaurant_id} não encontradas para pedido {order_id}. Finalizando execução sem simular rota.")
+        return
     if user_data:
         d_lat, d_lon = (float(user_data["lat"]), float(user_data["lon"]))
     else:
-        aux = get_random_sp_coordinate()
-        d_lat, d_lon = (float(aux["lat"]), float(aux["lon"]))
-
-    # 2. Busca Rota (Restaurante -> Cliente)
+        metrics.orders_failed += 1
+        log.warning(f"Coordenadas do usuário {user_id} não encontradas para pedido {order_id}. Finalizando execução sem simular rota.")
+        return
+    
+    # 2. Busca Rota (Entregador -> Restaurante -> Cliente)
     waypoints = await fetch_route(client, sem, config, o_lat, o_lon, d_lat, d_lon)
 
     if not (isinstance(waypoints, list) and len(waypoints) > 0):
-        log.debug(f"Rota falhou para pedido {order_id}. Finalizando execução sem simular rota.")
-        log.debug(waypoints)
+        log.warning(f"Rota falhou para pedido {order_id}. Finalizando execução sem simular rota.")
+        log.warning(waypoints)
         return
     
-    # 3. Transições com Delays Realistas
+    # 3. Transições com Delays
     async def advance(state: OrderState):
-        await _request(client, "PATCH", ORDER_URL, "/order", sem, config, json={"id_order": order_id, "id_state": state.value})
+        result = await _request(client, "PATCH", ORDER_URL, "/order", sem, config, json={"id_order": order_id, "id_state": state.value})
+        if result and result.get('id_state', None) == state.value:
+            return True
+        else:
+            return False
     
+    ## Estado 1 -> 2 (CONFIRMED -> PREPARING)
     await asyncio.sleep(random.uniform(config.delay_preparing_min, config.delay_preparing_max))
-    await advance(OrderState.PREPARING)
+    result = await advance(OrderState.PREPARING)
+    if not result:
+        metrics.orders_failed += 1
+        log.warning(f"Falha ao avançar para PREPARING no pedido {order_id}. Finalizando execução sem simular rota.")
+        return
+    ## Estado 2 -> 3 (PREPARING -> READY_FOR_PICKUP)
     await asyncio.sleep(random.uniform(config.delay_ready_min, config.delay_ready_max))
-    await advance(OrderState.READY_FOR_PICKUP)
+    result = await advance(OrderState.READY_FOR_PICKUP)
+    if not result:
+        metrics.orders_failed += 1
+        log.warning(f"Falha ao avançar para READY_FOR_PICKUP no pedido {order_id}. Finalizando execução sem simular rota.")
+        return
+    ## Estado 3 -> 4 (READY_FOR_PICKUP -> PICKED_UP)
     await asyncio.sleep(0.1)
-    await advance(OrderState.PICKED_UP)
+    result = await advance(OrderState.PICKED_UP)
+    if not result:
+        metrics.orders_failed += 1
+        log.warning(f"Falha ao avançar para PICKED_UP no pedido {order_id}. Finalizando execução sem simular rota.")
+        return
+    # Estado 4 -> 5 (PICKED_UP -> IN_TRANSIT)
     await asyncio.sleep(0.1)
-    await advance(OrderState.IN_TRANSIT)
+    result = await advance(OrderState.IN_TRANSIT)
+    if not result:
+        metrics.orders_failed += 1
+        log.warning(f"Falha ao avançar para IN_TRANSIT no pedido {order_id}. Finalizando execução sem simular rota.")
+        return
 
-    # log.info(waypoints)
     # 4. Tracking a cada 100ms (Req. Não-Funcional)
     if courier_id:
         # Limita o tempo da simulação de rota para aproximadamente 5s, mesmo que a rota tenha muitos pontos
@@ -257,7 +286,12 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
             })
             await asyncio.sleep(config.position_report_interval)
 
-    await advance(OrderState.DELIVERED)
+    # 5. Estado Final (IN_TRANSIT -> DELIVERED)
+    result = await advance(OrderState.DELIVERED)
+    if not result:
+        metrics.orders_failed += 1
+        log.warning(f"Falha ao avançar para DELIVERED no pedido {order_id}.")
+        return
     metrics.orders_completed += 1
 
 # ---------------------------------------------------------------------------
@@ -298,27 +332,33 @@ async def order_emitter(client, users, restaurants, config):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
-    tasks = []
+    tasks = set()
+
+    def _on_order_done(task: asyncio.Task):
+        tasks.discard(task)
+        metrics.max_simultaneous_orders = max(metrics.max_simultaneous_orders, len(tasks))
+        log.info(f"Pedidos em andamento restantes: {len(tasks)}")
 
     while time.perf_counter() < end_time:
         t_start = time.perf_counter()
-        
+
         u_id = random.choice(users)
         r_id = random.choice(restaurants)
-        tasks.append(asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config)))
-        
-        # Limpa tasks finalizadas da memória
-        tasks = [t for t in tasks if not t.done()]
-        
+
+        task = asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config))
+        tasks.add(task)
+        task.add_done_callback(_on_order_done)
+
         sleep_for = max(0.0, interval - (time.perf_counter() - t_start))
         await asyncio.sleep(sleep_for)
 
     if tasks:
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*list(tasks), return_exceptions=True)
 
 async def main():
     config = SimConfig()
+    print("Iniciando cénario:", config.scenario)
     limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
