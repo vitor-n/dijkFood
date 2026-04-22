@@ -19,7 +19,7 @@ delas, execute em seu terminal:
 ```bash
 $ docker -v
 $ aws --version
-$ docker run hello-worl
+$ docker run hello-world
 ```
 
 É esperado que os dois primeiros comandos mostrem as versões das ferramentas,
@@ -51,7 +51,7 @@ sejam fornecidas, um valor padrão será utilizado.
 Após definir as credenciais, execute:
 
 ```bash
-$ python deploy.py deploy
+$ python deploy.py all
 ```
 
 O script irá começar a subir a infraestrutura em sua AWS, levando em torno de

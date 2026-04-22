@@ -416,6 +416,7 @@ def main() -> None:
             return
         if not _truthy("AUTO_DESTROY"):
             input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)... ")
+        print("Destruindo infraestrutura")
         stage_terraform_destroy(db_user, db_pass_env)
         return
 

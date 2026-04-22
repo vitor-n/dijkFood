@@ -2,3 +2,4 @@ httpx
 faker
 python-dotenv
 shapely
+requests
