@@ -16,6 +16,7 @@ Variáveis de ambiente:
     TF_VAR_FILE         .tfvars (ex.: dev.tfvars), buscado na raiz do repo e em infra/terraform.
     AUTO_DESTROY        Se "1"/"true", comando `all` destrói sem prompt (CI).
     SKIP_DESTROY        Se "1"/"true", comando `all` não executa destroy após o deploy.
+    SCENARIO            O cenário para rodar a simulação. Ver documentação do arquivo mock/bootstrap/src/simulator.py
 
 Credenciais AWS: ~/.aws/credentials (não commitar segredos no repositório).
 
@@ -278,7 +279,7 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     simulator_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "simulator.py")
     utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
-    
+
     with open(simulator_path, "r", encoding="utf-8") as f:
         simulator_content = f.read()
     with open(main_path, "r", encoding="utf-8") as f:
@@ -288,8 +289,8 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     with open(req_path, "r", encoding="utf-8") as f:
         simulator_requirements = f.read()
     
-    print("Enviando scripts de simulação para o EC2 via SSM...")
     
+    scenario: str = os.getenv("SCENARIO", "normal")
     #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
     commands = [
         "#!/bin/bash",
@@ -313,9 +314,9 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "pip3 install -r requirements.txt",
         "set -a; source /etc/environment; set +a",
         "echo \"═════════ Iniciando Populate ═════════\"",
-        "python3 -u main.py",
+        f"SCENARIO={scenario} python3 -u main.py",
         "echo \"═════════ Iniciando Simulacao ═════════\"",
-        "python3 -u simulator.py"
+        f"SCENARIO={scenario} python3 -u simulator.py"
     ]
 
     log_group_name = "/aws/ssm/dijkfood-full-simulation"
@@ -323,6 +324,7 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
     ssm_client = boto3.client("ssm", region_name = aws_region)
     
+    print("Enviando scripts de simulação para o EC2 via SSM...")
     try:
         response = ssm_client.send_command(
             InstanceIds=[instance_id],

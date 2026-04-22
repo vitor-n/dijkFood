@@ -1,6 +1,33 @@
 # dijkFood
 
+*Desenvolvido por Anderson Falcão, João Felipe Villas Boas, Pedro
+Tokar e Vitor do Nascimento.*
 
+-------------------------------------------------------------------------------
+
+## Sobre o repositório
+
+Esse repositório é destinado à primeira avaliação da matéria de Computação
+em Nuvem, eletiva ofertada em 2026.1 da graduação de Ciência de Dados e
+Inteligência Artificial da FGV-EMAp.
+
+O trabalho consiste em desenhar uma arquitetura usando serviços da AWS (ECS,
+RDS, EC2, S3 e DynamoDB) para simular um serviço de gerenciamento de entregas
+de comida. O serviço conta com gerenciamento de usuários, restaurantes, pedidos
+(incluindo seus estados) e a posição dos entregadores. Ele é disponibilizado
+por meio de uma API REST, que oferece endpoints para os usuários do sistema
+poderem realizar as tarefas de criação de pedidos, tracking de entregadores, etc.
+
+O sistema usa serviços de autoscaling da AWS e de roteamento de requests 
+(o ALB do ECS) para gerenciar os recursos alocados de forma inteligente,
+alocando mais unidades de computação quando o serviço passa a receber um número
+muito grande de requests por segundo (simulando situações da vida real como
+feriados ou dias chuvosos). Mais detalhes a respeito da arquitetura e da
+implementação estão presentes no relatório.
+
+## Entregáveis
+
+Relatório: abrir arquivo [`Computação em Nuvem - A1.pdf`](./Computação em Nuvem - A1.pdf)
 
 ## Instruções de execução
 
