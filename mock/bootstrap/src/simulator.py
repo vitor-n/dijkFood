@@ -60,15 +60,8 @@ class OrderState(int, Enum):
 
 @dataclass
 class SimConfig:
-    _scenarios_mapping = {
-        "testing": 1.0,
-        "normal": 10.0,
-        "peak": 50.0,
-        "event": 200.0
-    }
-
     scenario: str = os.getenv("SCENARIO", "normal")
-    orders_per_second: float = _scenarios_mapping.get(scenario, 10.0)
+    orders_per_second: float = 0.0
     duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
@@ -79,8 +72,13 @@ class SimConfig:
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
 
     def __post_init__(self):
-        scenario_rps = {"normal": 10.0, "peak": 50.0, "event": 200.0}
-        self.orders_per_second = scenario_rps.get(self.scenario, self.orders_per_second)
+        scenarios_mapping = {
+            "testing": 10.0,
+            "normal": 10.0,
+            "peak": 50.0,
+            "event": 200.0
+        }
+        self.orders_per_second = scenarios_mapping.get(self.scenario, self.orders_per_second)
 
 # ---------------------------------------------------------------------------
 # Métricas Granulares (Para provar isolamento)
@@ -117,7 +115,10 @@ class Metrics:
         for r in self.records:
             # Agrupa endpoints parametrizados para o log ficar limpo
             ep = r["endpoint"]
-            if "/users/" in ep: ep = "/users/{id}"
+
+            if "/users?page" in ep: ep = "/users?page={X}"
+            elif "/users/" in ep: ep = "/users/{id}"
+            elif "/restaurants?page" in ep: ep = "/restaurants?page={X}"
             elif "/restaurants/" in ep: ep = "/restaurants/{id}"
             
             key = f"{r['method']} {ep}"
@@ -126,12 +127,15 @@ class Metrics:
         log.info(f"{'ENDPOINT':<35s} | {'COUNT':<6s} | {'AVG':<6s} | {'P50':<6s} | {'P95 (Req: <500ms)':<17s}")
         log.info("-" * 80)
         for key, latencies in sorted(by_endpoint.items()):
-            latencies.sort()
             n = len(latencies)
             avg = sum(latencies) / n
-            p50 = latencies[n // 2]
-            p95 = latencies[int(n * 0.95)]
-            
+            if(len(latencies) >= 2):
+                quantiles = statistics.quantiles(latencies, n=100)
+                p50 = quantiles[49]
+                p95 = quantiles[94]
+            else:
+                p50 = latencies[0]
+                p95 = latencies[0]     
             # Alerta visual se passar de 500ms
             p95_str = f"{p95:7.1f}ms"
             if p95 > 500: p95_str += " ⚠️"
@@ -205,11 +209,20 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     r_task = _request(client, "GET", CRUD_URL, f"/restaurants/{restaurant_id}", sem, config)
     user_data, rest_data = await asyncio.gather(u_task, r_task)
 
-    o_lat, o_lon = (float(user_data["lat"]), float(user_data["lon"])) if user_data else get_random_sp_coordinate()
-    d_lat, d_lon = (float(rest_data["lat"]), float(rest_data["lon"])) if rest_data else get_random_sp_coordinate()
+    if rest_data:
+        o_lat, o_lon = (float(rest_data["lat"]), float(rest_data["lon"]))
+    else:
+        aux = get_random_sp_coordinate()
+        o_lat, o_lon = (float(aux["lat"]), float(aux["lon"]))
+
+    if user_data:
+        d_lat, d_lon = (float(user_data["lat"]), float(user_data["lon"]))
+    else:
+        aux = get_random_sp_coordinate()
+        d_lat, d_lon = (float(aux["lat"]), float(aux["lon"]))
 
     # 2. Busca Rota (Restaurante -> Cliente)
-    waypoints = await fetch_route(client, sem, config, d_lat, d_lon, o_lat, o_lon)
+    waypoints = await fetch_route(client, sem, config, o_lat, o_lon, d_lat, d_lon)
 
     if not (isinstance(waypoints, list) and len(waypoints) > 0):
         log.debug(f"Rota falhou para pedido {order_id}. Finalizando execução sem simular rota.")
