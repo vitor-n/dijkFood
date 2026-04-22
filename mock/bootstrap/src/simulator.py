@@ -320,4 +320,5 @@ async def main():
     metrics.report(config)
 
 if __name__ == "__main__":
+    print(BASE_URL)
     asyncio.run(main())

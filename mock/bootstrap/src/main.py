@@ -243,4 +243,5 @@ async def run_bootstrap() -> dict:
 
 if __name__ == "__main__":
     print("Iniciando populate")
+    print(BASE_URL)
     asyncio.run(run_bootstrap())
