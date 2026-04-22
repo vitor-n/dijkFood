@@ -103,14 +103,14 @@ class Metrics:
         })
 
     def report(self, config: SimConfig):
-        log.info("=" * 80)
-        log.info(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
-        log.info(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
-        log.info(f"Erros de rede/timeout: {self.errors}")
-        log.info("=" * 80)
+        print("=" * 80)
+        print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
+        print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
+        print(f"Erros de rede/timeout: {self.errors}")
+        print("=" * 80)
         
         if not self.records:
-            log.info("Nenhuma métrica de rede coletada.")
+            print("Nenhuma métrica de rede coletada.")
             return
             
         by_endpoint: dict = {}
@@ -123,8 +123,8 @@ class Metrics:
             key = f"{r['method']} {ep}"
             by_endpoint.setdefault(key, []).append(r["latency_ms"])
 
-        log.info(f"{'ENDPOINT':<35s} | {'COUNT':<6s} | {'AVG':<6s} | {'P50':<6s} | {'P95 (Req: <500ms)':<17s}")
-        log.info("-" * 80)
+        print(f"{'ENDPOINT':<35s} | {'COUNT':<6s} | {'AVG':<6s} | {'P50':<6s} | {'P95 (Req: <500ms)':<17s}")
+        print("-" * 80)
         for key, latencies in sorted(by_endpoint.items()):
             latencies.sort()
             n = len(latencies)
@@ -136,8 +136,8 @@ class Metrics:
             p95_str = f"{p95:7.1f}ms"
             if p95 > 500: p95_str += " ⚠️"
             
-            log.info(f"{key:<35s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str}")
-        log.info("=" * 80)
+            print(f"{key:<35s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str}")
+        print("=" * 80)
 
 metrics = Metrics()
 
