@@ -35,8 +35,8 @@ load_dotenv()
 BASE_URL            = os.getenv("CRUD_URL", "http://localhost:8000")
 
 # Quantidades
-NUM_USERS           = int(os.getenv("NUM_USERS", 1000))
-NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 500))
+NUM_USERS           = int(os.getenv("NUM_USERS", 2500))
+NUM_RESTAURANTS     = int(os.getenv("NUM_RESTAURANTS", 1500))
 NUM_COURIERS        = int(os.getenv("NUM_COURIERS", NUM_USERS * 3))
 # ITEMS_PER_RESTAURANT = int(os.getenv("ITEMS_PER_RESTAURANT", 8))
 CUISINE_TYPE_IDS = list(range(1, 11))

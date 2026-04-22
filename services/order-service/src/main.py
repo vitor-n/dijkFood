@@ -21,7 +21,7 @@ async def healthz():
     return {"status": "ok"}
 
 
-engine = create_async_engine(settings.POSTGRES_ENDPOINT, echo=True)
+engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 25)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():
