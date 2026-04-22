@@ -5,7 +5,7 @@ Versão Final: Combina os endpoints corretos de microsserviços com a
 emissão cadenciada, delays realistas e métricas granulares por rota.
 
 Uso:
-  python load_simulator.py            # cenário padrão (10 req/s)
+  python load_simulator.py                 # cenário padrão (10 req/s)
   SCENARIO=peak python load_simulator.py   # 50 req/s
   SCENARIO=event python load_simulator.py  # 200 req/s
 """
@@ -60,10 +60,16 @@ class OrderState(int, Enum):
 
 @dataclass
 class SimConfig:
+    _scenarios_mapping = {
+        "normal": 10.0,
+        "peak": 50.0,
+        "event": 200.0
+    }
+
     scenario: str = os.getenv("SCENARIO", "normal")
-    orders_per_second: float = 10.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 30))
-    position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.5)) # 100ms exigido
+    orders_per_second: float = _scenarios_mapping.get(scenario, 10.0)
+    duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
+    position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
     delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
@@ -223,6 +229,12 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     # log.info(waypoints)
     # 4. Tracking a cada 100ms (Req. Não-Funcional)
     if courier_id:
+        # Limita o tempo da simulação de rota para aproximadamente 5s, mesmo que a rota tenha muitos pontos
+        limit_time = int(2.0 / config.position_report_interval)
+        if(len(waypoints) > limit_time): 
+            step = len(waypoints) // limit_time
+            waypoints = waypoints[::step] + [waypoints[-1]]
+        
         for wp_lat, wp_lon in waypoints:
             await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
                 "ID_courier": courier_id, "lat": wp_lat, "lon": wp_lon
