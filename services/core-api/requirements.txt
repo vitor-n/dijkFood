@@ -1,10 +1,10 @@
 asyncpg
-boto3
+aioboto3
 fastapi
 fastcrud
-h3
 psycopg2-binary
 pydantic
+h3
 python-dotenv
 sqlalchemy
 uvicorn[standard]

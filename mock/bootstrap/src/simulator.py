@@ -208,7 +208,7 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     u_task = _request(client, "GET", CRUD_URL, f"/users/{user_id}", sem, config)
     r_task = _request(client, "GET", CRUD_URL, f"/restaurants/{restaurant_id}", sem, config)
     user_data, rest_data = await asyncio.gather(u_task, r_task)
-
+    
     if rest_data:
         o_lat, o_lon = (float(rest_data["lat"]), float(rest_data["lon"]))
     else:

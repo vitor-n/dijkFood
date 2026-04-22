@@ -21,7 +21,7 @@ async def healthz():
     return {"status": "ok"}
 
 
-engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 25)
+engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 15)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():
@@ -45,9 +45,13 @@ async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get
     async with httpx.AsyncClient() as client:
         response = await client.get(
             urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
-            params = {"lat": restaurant.lat, "lon": restaurant.lon},
+            params = {"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
             timeout = 2.0
         )
+
+        if response.status_code == 422:
+            print("Detalhes da rejeição do FastAPI:", response.text)
+
         response.raise_for_status()
         couriers = response.json()
     

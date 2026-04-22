@@ -9,7 +9,10 @@ WORKDIR /app
 RUN adduser --disabled-password --gecos "" appuser
 
 COPY services/core-api/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y gcc python3-dev \
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y --auto-remove gcc python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY services/core-api/src ./src
 

@@ -1,11 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastcrud import crud_router, FastCRUD
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncpg
 from contextlib import asynccontextmanager
-import boto3
+import aioboto3
 import h3
-
 
 from functools import lru_cache
 from decimal import Decimal
@@ -21,7 +20,7 @@ from .config import settings
 
 #Isso é para rodar o DDL e DML no banco
 @asynccontextmanager
-async def lifespan(app):
+async def lifespan(app: FastAPI):
     print("Iniciando setup do banco de dados...")
     try:
         with open("sql/schema.sql", "r", encoding="utf-8") as f:
@@ -42,7 +41,17 @@ async def lifespan(app):
     except Exception as e:
         print(f"Erro ao inicializar o banco de dados: {e}")
         
-    yield
+    #Cria o pool de conexoes uma unica vez para toda a execução da API
+    session = aioboto3.Session()
+    
+    kwargs = {"region_name": settings.AWS_REGION}
+    ep = (settings.DYNAMO_ENDPOINT or "").strip()
+    if ep.startswith("http"):
+        kwargs["endpoint_url"] = ep
+
+    async with session.resource("dynamodb", **kwargs) as dynamo_resource:
+        app.state.dynamodb = dynamo_resource
+        yield
 
 #Aplicativo FastAPI
 app = FastAPI(lifespan = lifespan)
@@ -55,13 +64,9 @@ async def get_session():
     async with async_session() as session:
         yield session
 
-@lru_cache()
-def get_courier_dynamo_table():
-    db = boto3.resource(
-        "dynamodb",
-        region_name = settings.AWS_REGION
-    )
-    table = db.Table("CourierTracking")
+async def get_courier_dynamo_table(request: Request):
+    db = request.app.state.dynamodb
+    table = await db.Table("CourierTracking")
     return table
 
 #Mágica do fastcrud para gerar os endpoints básicos
@@ -104,7 +109,7 @@ async def create_courier_custom(
     await session.flush() 
 
     try:
-        courrier_table.put_item(
+        await courrier_table.put_item(
             Item = {
                 "ID_courier": courier_trimmed.id_courier,
                 "cell_index": h3.latlng_to_cell(courier.lat, courier.lon, 8),
