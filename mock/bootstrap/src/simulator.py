@@ -62,7 +62,7 @@ class OrderState(int, Enum):
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "testing")
     orders_per_second: float = 0.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 15))
+    duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
@@ -92,6 +92,7 @@ class Metrics:
     orders_completed: int = 0
     orders_failed: int = 0
     errors: int = 0
+    max_simultaneous_orders: int = 0
 
     def record_latency(self, endpoint: str, method: str, latency_ms: float, status: int):
         self.records.append({
@@ -106,6 +107,7 @@ class Metrics:
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
         print(f"Pedidos não criados: {self.orders_not_created}")
+        print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
         print(f"Erros de rede/timeout: {self.errors}")
         print("=" * 80)
         
@@ -330,24 +332,29 @@ async def order_emitter(client, users, restaurants, config):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
-    tasks = []
+    tasks = set()
+
+    def _on_order_done(task: asyncio.Task):
+        tasks.discard(task)
+        metrics.max_simultaneous_orders = max(metrics.max_simultaneous_orders, len(tasks))
+        log.info(f"Pedidos em andamento restantes: {len(tasks)}")
 
     while time.perf_counter() < end_time:
         t_start = time.perf_counter()
-        
+
         u_id = random.choice(users)
         r_id = random.choice(restaurants)
-        tasks.append(asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config)))
-        
-        # Limpa tasks finalizadas da memória
-        tasks = [t for t in tasks if not t.done()]
-        
+
+        task = asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config))
+        tasks.add(task)
+        task.add_done_callback(_on_order_done)
+
         sleep_for = max(0.0, interval - (time.perf_counter() - t_start))
         await asyncio.sleep(sleep_for)
 
     if tasks:
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*list(tasks), return_exceptions=True)
 
 async def main():
     config = SimConfig()
