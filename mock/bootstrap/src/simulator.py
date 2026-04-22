@@ -61,6 +61,7 @@ class OrderState(int, Enum):
 @dataclass
 class SimConfig:
     _scenarios_mapping = {
+        "testing": 1.0,
         "normal": 10.0,
         "peak": 50.0,
         "event": 200.0
@@ -75,7 +76,7 @@ class SimConfig:
     delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
     delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
-    max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 2))
+    max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
 
     def __post_init__(self):
         scenario_rps = {"normal": 10.0, "peak": 50.0, "event": 200.0}
@@ -223,14 +224,16 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     await advance(OrderState.PREPARING)
     await asyncio.sleep(random.uniform(config.delay_ready_min, config.delay_ready_max))
     await advance(OrderState.READY_FOR_PICKUP)
+    await asyncio.sleep(0.1)
     await advance(OrderState.PICKED_UP)
+    await asyncio.sleep(0.1)
     await advance(OrderState.IN_TRANSIT)
 
     # log.info(waypoints)
     # 4. Tracking a cada 100ms (Req. Não-Funcional)
     if courier_id:
         # Limita o tempo da simulação de rota para aproximadamente 5s, mesmo que a rota tenha muitos pontos
-        limit_time = int(2.0 / config.position_report_interval)
+        limit_time = int(5.0 / config.position_report_interval)
         if(len(waypoints) > limit_time): 
             step = len(waypoints) // limit_time
             waypoints = waypoints[::step] + [waypoints[-1]]
