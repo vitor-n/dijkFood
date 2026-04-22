@@ -39,14 +39,13 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 TERRAFORM_DIR = os.path.join("infra", "terraform")
 TF_ABS = os.path.join(PROJECT_ROOT, TERRAFORM_DIR)
 
-def inject_lab_role_arn():
+def retrieve_lab_role_arn():
     try:
         iam_client = boto3.client("iam")
         response = iam_client.get_role(RoleName = "LabRole")
         arn = response["Role"]["Arn"]
-        os.environ["TF_VAR_execution_role_arn"] = arn
-        os.environ["TF_VAR_task_role_arn"] = arn
         print(f"Usando LabRole {arn} encontrada automaticamente.")
+        return arn
     except Exception as e:
         print(f"Erro ao acessar a LabRole: {e}")
         raise
@@ -80,11 +79,11 @@ def terraform_var_file_args() -> list[str]:
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
 
-def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
+def terraform_db_var_args(db_user: str, db_pass: str | None, arn_role) -> list[str]:
     """Só injeta -var de DB se a senha vier no ambiente (evita sobrescrever tfvars com vazio)."""
     if not db_pass:
         return []
-    return [f"-var=db_username={db_user}", f"-var=db_password={db_pass}"]
+    return [f"-var=db_username={db_user}", f"-var=db_password={db_pass}", f"-var=execution_role_arn={arn_role}", f"-var=task_role_arn={arn_role}"]
 
 
 def execute_terraform_command(args: list[str], **kw: Any) -> subprocess.CompletedProcess[Any]:
@@ -116,32 +115,32 @@ def stage_terraform_init() -> None:
     execute_terraform_command(["init", "-input=false"])
 
 
-def stage_terraform_plan(db_user: str, db_pass: str | None) -> None:
+def stage_terraform_plan(db_user: str, db_pass: str | None, arn_role) -> None:
     print("\n═══ Terraform plan ═══")
-    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass)]
+    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass, arn_role)]
     execute_terraform_command(args)
 
 
-def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
+def stage_terraform_apply(db_user: str, db_pass: str | None, arn_role) -> None:
     print("\n═════════ Aplicando infraestrutura definida no Terraform ═════════")
     args = [
         "apply",
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_db_var_args(db_user, db_pass, arn_role),
     ]
     execute_terraform_command(args)
 
 
-def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
+def stage_terraform_destroy(db_user: str, db_pass: str | None, arn_role) -> None:
     print("\n═════════ Destruindo a infraestrutura com Terraform ═════════")
     args = [
         "destroy",
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_db_var_args(db_user, db_pass, arn_role),
     ]
     execute_terraform_command(args)
     print("  Recursos AWS removidos pelo terraform.")
@@ -246,12 +245,12 @@ def stage_smoke_from_state() -> None:
 
 
 #Função principal para executar todo o workflow
-def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
+def run_full_deploy(db_user: str, db_password: str | None, arn_role) -> dict[str, Any]:
     #Executa terraform init
     stage_terraform_init()
 
     #Executa o comando terraform apply, espera-se que a variável de ambiente de usuário e a de senham estejam setadas aqui
-    stage_terraform_apply(db_user, db_password)
+    stage_terraform_apply(db_user, db_password, arn_role)
 
     #Pega os outputs do comando do terraform, pra usar eles
     outputs = tf_output()
@@ -385,11 +384,11 @@ def main() -> None:
     load_dotenv()
     db_user = os.environ.get("DB_USERNAME", "dijkfood_admin")
     db_pass_env = os.environ.get("DB_PASSWORD", "12345678").strip() or None
-    inject_lab_role_arn()
+    arn_role = retrieve_lab_role_arn()
 
     if action == "plan":
         stage_terraform_init()
-        stage_terraform_plan(db_user, db_pass_env)
+        stage_terraform_plan(db_user, db_pass_env, arn_role)
         return
 
     if action == "smoke":
@@ -398,11 +397,11 @@ def main() -> None:
 
     if action == "destroy":
         stage_terraform_init()
-        stage_terraform_destroy(db_user, db_pass_env)
+        stage_terraform_destroy(db_user, db_pass_env, arn_role)
         return
 
     if action == "deploy":
-        run_full_deploy(db_user, db_pass_env)
+        run_full_deploy(db_user, db_pass_env, arn_role)
         return
     
     if action == "simulate":
@@ -411,7 +410,7 @@ def main() -> None:
         return
 
     if action == "all":
-        outputs = run_full_deploy(db_user, db_pass_env)
+        outputs = run_full_deploy(db_user, db_pass_env, arn_role)
         stage_run_load_test(outputs)
         if _truthy("SKIP_DESTROY"):
             print("\nSKIP_DESTROY=1 — não executando destroy.")
@@ -419,7 +418,7 @@ def main() -> None:
         if not _truthy("AUTO_DESTROY"):
             input("\nPressione Enter para executar terraform destroy (ou Ctrl+C para cancelar)... ")
         print("Destruindo infraestrutura")
-        stage_terraform_destroy(db_user, db_pass_env)
+        stage_terraform_destroy(db_user, db_pass_env, arn_role)
         return
 
     print_usage()
