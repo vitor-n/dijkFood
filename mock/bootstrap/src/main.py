@@ -26,6 +26,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger("bootstrap")
+log.addHandler(logging.StreamHandler(sys.stdout))
 
 # ---------------------------------------------------------------------------
 # Configuração

@@ -17,6 +17,7 @@ import logging
 import time
 import statistics
 import httpx
+import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -34,6 +35,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("simulator")
+log.addHandler(logging.StreamHandler(sys.stdout))
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -288,7 +290,7 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
             # Repete o último waypoint até preencher o limit_time esperado
             needed = limit_time - len(waypoints)
             waypoints = waypoints + [waypoints[-1]] * needed
-            
+
         for wp_lat, wp_lon in waypoints:
             await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
                 "ID_courier": courier_id, "lat": wp_lat, "lon": wp_lon

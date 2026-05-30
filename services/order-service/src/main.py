@@ -21,8 +21,13 @@ async def healthz():
     return {"status": "ok"}
 
 
-engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 15)
+engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 30)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+http_client = httpx.AsyncClient()
+
+with open("./order_update_query.sql") as f:
+    UPDATE_SQL_QUERY = f.read()
 
 async def get_db():
     async with async_session() as session:
@@ -42,32 +47,32 @@ async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get
     
     print("restaurante existe:", restaurant.lat, restaurant.lon)
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
-            params = {"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
+
+    response = await http_client.get(
+        urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
+        params = {"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
+        timeout = 2.0
+    )
+
+    if response.status_code == 422:
+        print("Detalhes da rejeição do FastAPI:", response.text)
+
+    response.raise_for_status()
+    couriers = response.json()
+
+    if len(couriers["Items"]) == 0:
+        raise HTTPException(status_code = 404, detail = "Não temos entregadores disponíveis")
+    
+    #TODO: Implement proper loop
+    for courier in couriers["Items"]:
+        response = await http_client.patch(
+            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
+            json = {"ID_courier": courier["ID_courier"], "status": "BUSY"},
             timeout = 2.0
         )
-
-        if response.status_code == 422:
-            print("Detalhes da rejeição do FastAPI:", response.text)
-
         response.raise_for_status()
-        couriers = response.json()
-    
-        if len(couriers["Items"]) == 0:
-            raise HTTPException(status_code = 404, detail = "Não temos entregadores disponíveis")
-        
-        #TODO: Implement proper loop
-        for courier in couriers["Items"]:
-            response = await client.patch(
-                urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-                json = {"ID_courier": courier["ID_courier"], "status": "BUSY"},
-                timeout = 2.0
-            )
-            response.raise_for_status()
-            print(response.json())
-            break
+        print(response.json())
+        break
 
     try:
         new_order = Order(
@@ -106,11 +111,9 @@ async def update_order(
     if req.id_state < 2 or req.id_state > 6:
         raise HTTPException(status_code = 400, detail = "Invalid state for update operation")
     try:
-        with open("./order_update_query.sql") as f:
-            sql_query = f.read()
         params = {"id_novo_estado": req.id_state, "id_pedido": req.id_order, "id_estado_antigo_esperado": req.id_state - 1}
 
-        sql_query = text(sql_query)
+        sql_query = text(UPDATE_SQL_QUERY)
         result = await db.execute(sql_query, params)
         
         updated_row = result.fetchone()
@@ -127,13 +130,12 @@ async def update_order(
             if order is None:
                 raise HTTPException(status_code = 500, detail = "Internal error: failed to mark courier as available, aborting")
     
-            async with httpx.AsyncClient() as client:
-                response = await client.patch(
-                    urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-                    json = {"ID_courier": order.ID_courier, "status": "AVAILABLE"},
-                    timeout = 2.0
-                )
-                response.raise_for_status()
+            response = await http_client.patch(
+                urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
+                json = {"ID_courier": order.ID_courier, "status": "AVAILABLE"},
+                timeout = 2.0
+            )
+            response.raise_for_status()
 
         await db.commit()
         row_dict = updated_row._mapping

@@ -29,6 +29,7 @@ import boto3
 from dotenv import load_dotenv
 import json
 import os
+
 import subprocess
 import sys
 import time
@@ -291,6 +292,7 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     
     
     scenario: str = os.getenv("SCENARIO", "normal")
+    tracking_lifetime: str = os.getenv("TRACKING_LIFETIME", 5.0)
     #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
     commands = [
         "#!/bin/bash",
@@ -314,9 +316,9 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "pip3 install -r requirements.txt",
         "set -a; source /etc/environment; set +a",
         "echo \"═════════ Iniciando Populate ═════════\"",
-        f"SCENARIO={scenario} python3 -u main.py",
+        f"SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u main.py",
         "echo \"═════════ Iniciando Simulacao ═════════\"",
-        f"SCENARIO={scenario} python3 -u simulator.py"
+        f"SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u simulator.py"
     ]
 
     log_group_name = "/aws/ssm/dijkfood-full-simulation"
@@ -372,7 +374,7 @@ def main() -> None:
         sys.exit(1)
 
     action = sys.argv[1].strip().lower()
-    valid = ("deploy", "destroy", "all", "plan", "smoke", "help", "simulate", "-h", "--help")
+    valid = ("deploy", "update", "destroy", "all", "plan", "smoke", "help", "simulate", "-h", "--help")
     if action in ("help", "-h", "--help"):
         print_usage()
         return
@@ -404,6 +406,7 @@ def main() -> None:
     if action == "update":
         out = tf_output()
         stage_build_push(out)
+        return
 
     if action == "deploy":
         run_full_deploy(db_user, db_pass_env, arn_role)
