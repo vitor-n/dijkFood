@@ -11,6 +11,8 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI(title="DijkFood Routing Service")
 
+import anyio
+
 @app.get("/healthz", tags=["ops"])
 async def healthz():
     return {"status": "ok"}
@@ -19,6 +21,13 @@ async def healthz():
 @app.get("/routes/healthz", tags=["ops"])
 async def routes_healthz():
     return {"status": "ok"}
+
+@app.on_event("startup")
+async def startup_event():
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = 3
+    print("Threadpool do calculo de rotas limitado a 3 workers.")
+
 
 # DEFAULT_GRAPH_PATH = Path(__file__).resolve().parent.parent / "data" / "sao_paulo.pkl"
 GRAPH_PATH = "/app/data/sao_paulo.pkl"
@@ -44,7 +53,7 @@ coords_radians = np.radians(nodes_data[["y", "x"]].values)
 spatial_tree = BallTree(coords_radians, metric="haversine")
 
 @app.post("/routes/calculate", response_model=RouteResponse)
-async def find_route(req: RouteRequest):
+def find_route(req: RouteRequest):
     query_coords = np.radians([
         [req.orig_lat, req.orig_lon],
         [req.dest_lat, req.dest_lon]

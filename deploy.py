@@ -406,6 +406,7 @@ def main() -> None:
     if action == "update":
         out = tf_output()
         stage_build_push(out)
+        stage_force_ecs_deploy(out)
         return
 
     if action == "deploy":
