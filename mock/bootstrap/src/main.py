@@ -53,6 +53,10 @@ config_retry = {
 
 fake = Faker("pt_BR")
 
+SILENT = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
+if SILENT:
+    logging.getLogger("httpx").setLevel(logging.ERROR)
+
 # ---------------------------------------------------------------------------
 # Resultado agregado
 # ---------------------------------------------------------------------------

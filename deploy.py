@@ -4,6 +4,7 @@ DijkFood — deploy automatizado (Terraform + ECR + RDS + ECS)
 
 Comandos:
     python deploy.py deploy    Aplica a infraestrutura, faz build/push das imagens, força o deploy ECS e faz smoke test.
+    python deploy.py update    Recompila e faz push das imagens do docker.
     python deploy.py destroy   Destrói a infraestrutura com o Terraform (exige as mesmas credenciais de DB que o apply).
     python deploy.py all       Faz deploy, executa testes e destrói a infraestrutura (com confirmação ou AUTO_DESTROY).
     python deploy.py plan      Apenas executa o `terraform plan` para análise da infraestrutura
@@ -400,10 +401,14 @@ def main() -> None:
         stage_terraform_destroy(db_user, db_pass_env, arn_role)
         return
 
+    if action == "update":
+        out = tf_output()
+        stage_build_push(out)
+
     if action == "deploy":
         run_full_deploy(db_user, db_pass_env, arn_role)
         return
-    
+
     if action == "simulate":
         out = tf_output()
         stage_run_load_test(out)

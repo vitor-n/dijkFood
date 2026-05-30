@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastcrud import crud_router, FastCRUD
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import asyncpg
 from contextlib import asynccontextmanager
 import aioboto3
@@ -108,6 +109,7 @@ async def create_courier_custom(
     session.add(courier_trimmed)
     await session.flush() 
 
+    start = time.perf_counter_ns()
     try:
         await courrier_table.put_item(
             Item = {
@@ -122,13 +124,53 @@ async def create_courier_custom(
     except Exception as e:
         await session.rollback()        
         print(f"Erro ao salvar no DynamoDB: {e}")
+        duration = time.perf_counter_ns() - start
+        print(f"Escrever no Dynamo levou {duration // 1000000}ms.")
         raise HTTPException(
             status_code=500, 
             detail="Error while writing courier to dynamodb. Aborting."
         )
-
+    duration = time.perf_counter_ns() - start
+    print(f"Escrever no Dynamo levou {duration // 1000000}ms.")
     await session.commit()
     return courier_trimmed
+
+@app.delete("/couriers/{id_courier}", tags=["Couriers"])
+async def delete_courier_custom(
+    id_courier: int,
+    session: AsyncSession = Depends(get_session),
+    courrier_table = Depends(get_courier_dynamo_table)
+):
+    # Garante que o entregador existe no banco de dados
+    stmt = select(Courier).where(Courier.id_courier == id_courier)
+    result = await session.execute(stmt)
+    courier = result.scalar_one_or_none()
+
+    if not courier:
+        raise HTTPException(status_code=404, detail="Courier not found")
+
+    # Inicia a remoção do banco 
+    await session.delete(courier)
+    await session.flush()
+
+    # Remove do DynamoDB
+    try:
+        await courrier_table.delete_item(
+            Key={
+                "ID_courier": id_courier
+            }
+        )
+    except Exception as e:
+        await session.rollback()
+        print(f"Erro ao remover do DynamoDB: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error while deleting courier from dynamodb. Aborting."
+        )
+
+    # Se tudo deu certo, commita a transação no banco
+    await session.commit()
+    return {"message": "Courier deleted successfully from SQL and DynamoDB"}
 
 app.include_router(crud_router(
     session = get_session,

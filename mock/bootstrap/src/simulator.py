@@ -17,6 +17,7 @@ import logging
 import time
 import statistics
 import httpx
+from datetime import datetime
 
 from dotenv import load_dotenv
 from enum import Enum
@@ -58,6 +59,8 @@ class OrderState(int, Enum):
     IN_TRANSIT       = 5
     DELIVERED        = 6
 
+SILENT = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
+
 @dataclass
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "testing")
@@ -68,8 +71,10 @@ class SimConfig:
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
     delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
     delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
+    tracking_lifetime: float = float(os.getenv("TRACKING_LIFETIME", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
+    silent: bool = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
 
     def __post_init__(self):
         scenarios_mapping = {
@@ -275,11 +280,15 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
     # 4. Tracking a cada 100ms (Req. Não-Funcional)
     if courier_id:
         # Limita o tempo da simulação de rota para aproximadamente 5s, mesmo que a rota tenha muitos pontos
-        limit_time = int(5.0 / config.position_report_interval)
+        limit_time = int(config.tracking_lifetime / config.position_report_interval)
         if(len(waypoints) > limit_time): 
             step = len(waypoints) // limit_time
             waypoints = waypoints[::step] + [waypoints[-1]]
-        
+        elif len(waypoints) < limit_time and len(waypoints) > 0:
+            # Repete o último waypoint até preencher o limit_time esperado
+            needed = limit_time - len(waypoints)
+            waypoints = waypoints + [waypoints[-1]] * needed
+            
         for wp_lat, wp_lon in waypoints:
             await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
                 "ID_courier": courier_id, "lat": wp_lat, "lon": wp_lon
@@ -358,7 +367,11 @@ async def order_emitter(client, users, restaurants, config):
 
 async def main():
     config = SimConfig()
-    print("Iniciando cénario:", config.scenario)
+
+    if config.silent:
+        logging.getLogger("httpx").setLevel(logging.ERROR)
+
+    print("Iniciando cénario:", config.scenario, "às", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
     limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
