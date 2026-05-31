@@ -90,7 +90,7 @@ variable "core_api_min" {
 variable "core_api_max" {
   description = "Max task count for core-api auto-scaling"
   type        = number
-  default     = 10
+  default     = 12
 }
 
 variable "routing_cpu" {

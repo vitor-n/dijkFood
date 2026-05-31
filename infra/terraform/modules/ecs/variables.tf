@@ -116,7 +116,7 @@ variable "core_api_min" {
 
 variable "core_api_max" {
   type    = number
-  default = 10
+  default = 12
 }
 
 # routing-service sizing
