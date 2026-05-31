@@ -112,6 +112,16 @@ def ecr_login(region: str, registry_url: str) -> None:
     )
 
 
+def check_docker_ready() -> None:
+    """Falha cedo com uma mensagem clara se o Docker daemon não estiver disponível."""
+    try:
+        run_command(["docker", "info"], capture=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Docker não está pronto. Abra o Docker Desktop e aguarde o engine Linux iniciar antes de rodar o deploy."
+        ) from exc
+
+
 def stage_terraform_init() -> None:
     print("\n═════════ Iniciando terraform ═════════")
     execute_terraform_command(["init", "-input=false"])
@@ -150,6 +160,8 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None, arn_role) -> None
 
 def stage_build_push(outputs: dict[str, Any]) -> None:
     print("\n═════════ Fazendo deploy das imagens docker (ECR) ═════════")
+
+    check_docker_ready()
     
     #Pega a região e a url de algum dos repositórios pra poder fazer login com o cli
     region = outputs["aws_region"]["value"]
