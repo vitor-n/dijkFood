@@ -4,8 +4,8 @@ resource "aws_dynamodb_table" "courier_positions" {
 
   hash_key  = "ID_courier"
 
-  read_capacity  = 10
-  write_capacity = 10
+  read_capacity  = 30
+  write_capacity = 300
 
   attribute {
     name = "ID_courier"
@@ -23,8 +23,8 @@ resource "aws_dynamodb_table" "courier_positions" {
     range_key          = "ID_courier"
     projection_type    = "INCLUDE"
     non_key_attributes = ["status", "lat", "lon", "updated_at"]
-    read_capacity      = 10
-    write_capacity     = 10
+    read_capacity      = 30
+    write_capacity     = 300
   }
 
   point_in_time_recovery {

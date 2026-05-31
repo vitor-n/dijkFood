@@ -45,7 +45,7 @@ variable "db_password" {
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t3.small"
+  default     = "db.t3.medium"
 }
 
 variable "db_multi_az" {
@@ -66,13 +66,13 @@ variable "load_tester_instance_type" {
 variable "core_api_cpu" {
   description = "CPU units for core-api task (1024 = 1 vCPU)"
   type        = number
-  default     = 512
+  default     = 2048
 }
 
 variable "core_api_memory" {
   description = "Memory (MiB) for core-api task"
   type        = number
-  default     = 1024
+  default     = 4096
 }
 
 variable "core_api_desired" {
@@ -90,37 +90,37 @@ variable "core_api_min" {
 variable "core_api_max" {
   description = "Max task count for core-api auto-scaling"
   type        = number
-  default     = 10
+  default     = 12
 }
 
 variable "routing_cpu" {
   description = "CPU units for routing-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "routing_memory" {
   description = "Memory (MiB) for routing-service task"
   type        = number
-  default     = 2048
+  default     = 4096
 }
 
 variable "routing_desired" {
   description = "Desired task count for routing-service"
   type        = number
-  default     = 2
+  default     = 6
 }
 
 variable "routing_min" {
   description = "Min task count for routing-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 6
 }
 
 variable "routing_max" {
   description = "Max task count for routing-service auto-scaling"
   type        = number
-  default     = 6
+  default     = 60
 }
 
 variable "execution_role_arn" {
@@ -148,19 +148,19 @@ variable "tracking_memory" {
 variable "tracking_desired" {
   description = "Desired task count for tracking-service"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "tracking_min" {
   description = "Min task count for tracking-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "tracking_max" {
   description = "Max task count for tracking-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 60
 }
 
 variable "order_cpu" {
@@ -178,17 +178,17 @@ variable "order_memory" {
 variable "order_desired" {
   description = "Desired task count for order-service"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 variable "order_min" {
   description = "Min task count for order-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 60
 }

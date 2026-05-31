@@ -191,6 +191,8 @@ module "ecs" {
 
   core_api_alb_resource_label = "${module.alb.arn_suffix}/${module.alb.core_api_target_group_arn_suffix}"
   routing_alb_resource_label  = "${module.alb.arn_suffix}/${module.alb.routing_target_group_arn_suffix}"
+  tracking_alb_resource_label = "${module.alb.arn_suffix}/${module.alb.tracking_target_group_arn_suffix}"
+  order_alb_resource_label    = "${module.alb.arn_suffix}/${module.alb.order_target_group_arn_suffix}"
 
   alb_dns_name = module.alb.dns_name
 
