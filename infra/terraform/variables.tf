@@ -178,13 +178,13 @@ variable "order_memory" {
 variable "order_desired" {
   description = "Desired task count for order-service"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "order_min" {
   description = "Min task count for order-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "order_max" {

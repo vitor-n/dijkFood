@@ -184,12 +184,12 @@ variable "order_memory" {
 
 variable "order_desired" {
   type    = number
-  default = 2
+  default = 4
 }
 
 variable "order_min" {
   type    = number
-  default = 2
+  default = 4
 }
 
 variable "order_max" {
