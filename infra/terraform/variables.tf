@@ -96,13 +96,13 @@ variable "core_api_max" {
 variable "routing_cpu" {
   description = "CPU units for routing-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "routing_memory" {
   description = "Memory (MiB) for routing-service task"
   type        = number
-  default     = 2048
+  default     = 4096
 }
 
 variable "routing_desired" {
@@ -120,7 +120,7 @@ variable "routing_min" {
 variable "routing_max" {
   description = "Max task count for routing-service auto-scaling"
   type        = number
-  default     = 12
+  default     = 60
 }
 
 variable "execution_role_arn" {
@@ -160,7 +160,7 @@ variable "tracking_min" {
 variable "tracking_max" {
   description = "Max task count for tracking-service auto-scaling"
   type        = number
-  default     = 4
+  default     = 60
 }
 
 variable "order_cpu" {
@@ -190,5 +190,5 @@ variable "order_min" {
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 8
+  default     = 60
 }

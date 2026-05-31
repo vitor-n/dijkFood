@@ -67,6 +67,16 @@ variable "routing_alb_resource_label" {
   type        = string
 }
 
+variable "tracking_alb_resource_label" {
+  description = "ALB resource label for tracking auto-scaling (arn_suffix/tg_arn_suffix)"
+  type        = string
+}
+
+variable "order_alb_resource_label" {
+  description = "ALB resource label for order auto-scaling (arn_suffix/tg_arn_suffix)"
+  type        = string
+}
+
 variable "alb_dns_name" {
   type = string
 }
@@ -95,106 +105,86 @@ variable "graph_bucket_arn" {
 
 # core-api sizing
 variable "core_api_cpu" {
-  type    = number
-  default = 2048
+  type = number
 }
 
 variable "core_api_memory" {
-  type    = number
-  default = 4096
+  type = number
 }
 
 variable "core_api_desired" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "core_api_min" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "core_api_max" {
-  type    = number
-  default = 12
+  type = number
 }
 
 # routing-service sizing
 variable "routing_cpu" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "routing_memory" {
-  type    = number
-  default = 2048
+  type = number
 }
 
 variable "routing_desired" {
-  type    = number
-  default = 6
+  type = number
 }
 
 variable "routing_min" {
-  type    = number
-  default = 6
+  type = number
 }
 
 variable "routing_max" {
-  type    = number
-  default = 12
+  type = number
 }
 
 # tracking-service sizing
 variable "tracking_cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "tracking_memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "tracking_desired" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "tracking_min" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "tracking_max" {
-  type    = number
-  default = 4
+  type = number
 }
 
 # order-service sizing
 variable "order_cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "order_memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "order_desired" {
-  type    = number
-  default = 4
+  type = number
 }
 
 variable "order_min" {
-  type    = number
-  default = 4
+  type = number
 }
 
 variable "order_max" {
-  type    = number
-  default = 8
+  type = number
 }
 
 variable "execution_role_arn" {
