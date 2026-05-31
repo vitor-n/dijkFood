@@ -21,7 +21,11 @@ async def healthz():
     return {"status": "ok"}
 
 
-engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 30)
+engine = create_async_engine(
+    settings.POSTGRES_ENDPOINT, 
+    pool_size = 50, 
+    max_overflow = 20
+)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 http_client = httpx.AsyncClient()
