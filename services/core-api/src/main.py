@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks
 from fastcrud import crud_router, FastCRUD
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from .models import (User, UserSchema,
                    Courier, CourierGeneralSchema, CourierCreationSchema,
                    async_session)
 from .routers import router as extra_router
+from .firehose import send_to_firehose
 
 from .config import settings
 
@@ -50,9 +51,14 @@ async def lifespan(app: FastAPI):
     if ep.startswith("http"):
         kwargs["endpoint_url"] = ep
 
+    # Client do Dynamo
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
         app.state.dynamodb = dynamo_resource
-        yield
+        
+        # Client do Firehose
+        async with session.client("firehose", region_name=settings.AWS_REGION) as firehose_client:
+            app.state.firehose_client = firehose_client
+            yield
 
 #Aplicativo FastAPI
 app = FastAPI(lifespan = lifespan)
@@ -63,12 +69,69 @@ async def healthz():
 
 async def get_session():
     async with async_session() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await session.close()
 
 async def get_courier_dynamo_table(request: Request):
     db = request.app.state.dynamodb
     table = await db.Table("CourierTracking")
     return table
+
+#Sobreescreve endpoints básicos pra poder salvar dados no firehose
+@app.post("/users", response_model=UserSchema, tags=["Users"])
+async def create_user_custom(
+    user: UserSchema,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session)
+):
+    new_user = User(**user.model_dump())
+    session.add(new_user)
+    await session.commit()
+    await session.refresh(new_user)
+
+    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
+    user_data = new_user.__dict__.copy()
+    user_data.pop("_sa_instance_state", None)
+
+    # Dispara para o Firehose em segundo plano
+    background_tasks.add_task(
+        send_to_firehose,
+        request,
+        "User",
+        "CREATE",
+        user_data
+    )
+    return new_user
+
+
+@app.post("/restaurants", response_model=RestaurantSchema, tags=["Restaurants"])
+async def create_restaurant_custom(
+    restaurant: RestaurantSchema,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session)
+):
+    new_restaurant = Restaurant(**restaurant.model_dump())
+    session.add(new_restaurant)
+    await session.commit()
+    await session.refresh(new_restaurant)
+
+    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
+    restaurant_data = new_restaurant.__dict__.copy()
+    restaurant_data.pop("_sa_instance_state", None)
+
+    # Dispara para o Firehose em segundo plano
+    background_tasks.add_task(
+        send_to_firehose,
+        request,
+        "Restaurant",
+        "CREATE",
+        restaurant_data
+    )
+    return new_restaurant
 
 #Mágica do fastcrud para gerar os endpoints básicos
 app.include_router(crud_router(
@@ -97,6 +160,8 @@ courier_crud = FastCRUD(Courier)
 @app.post("/couriers", response_model = CourierGeneralSchema, tags=["Couriers"])
 async def create_courier_custom(
     courier: CourierCreationSchema, 
+    request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     courrier_table = Depends(get_courier_dynamo_table)
 ):
@@ -133,6 +198,18 @@ async def create_courier_custom(
     duration = time.perf_counter_ns() - start
     print(f"Escrever no Dynamo levou {duration // 1000000}ms.")
     await session.commit()
+
+    courier_data = courier_trimmed.__dict__.copy()
+    courier_data.pop("_sa_instance_state", None)
+    
+    background_tasks.add_task(
+        send_to_firehose, 
+        request, 
+        "Courier", 
+        "CREATE", 
+        courier_data
+    )
+
     return courier_trimmed
 
 @app.delete("/couriers/{id_courier}", tags=["Couriers"])

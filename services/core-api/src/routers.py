@@ -5,7 +5,7 @@ Inclua no main.py:
     from .routers import router as extra_router
     app.include_router(extra_router)
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -19,6 +19,7 @@ from .schemas import (
     ItemCreateSchema,
     ItemResponseSchema,
 )
+from .firehose import send_to_firehose
 
 router = APIRouter()
 
@@ -130,6 +131,8 @@ async def get_order_history(
 async def add_menu_item(
     restaurant_id: int,
     payload: ItemCreateSchema,
+    request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -148,6 +151,19 @@ async def add_menu_item(
     session.add(item)
     await session.commit()
     await session.refresh(item)
+
+    item_data = {
+        "id_item": item.id_item,
+        "name": item.name,
+        "id_restaurant": item.id_restaurant
+    }
+    background_tasks.add_task(
+        send_to_firehose, 
+        request, 
+        "MenuItem", 
+        "CREATE", 
+        item_data
+    )
 
     return ItemResponseSchema(
         id_item=item.id_item,

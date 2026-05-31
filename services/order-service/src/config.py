@@ -24,4 +24,6 @@ class Settings:
         "TRACKING_SERVICE_ENDPOINT",
         "http://127.0.0.1:8002/",
     )
+    FIREHOSE_STREAM_NAME: str = os.environ.get("FIREHOSE_STREAM_NAME", "PUT-S3-4k3iv")
+
 settings = Settings()

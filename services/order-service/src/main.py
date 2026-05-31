@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 import httpx
+from contextlib import asynccontextmanager
+import aioboto3
+import json
 
 from sqlalchemy import text, select
 from sqlalchemy.orm import sessionmaker
@@ -12,8 +15,16 @@ from .models import (Order, OrderEvent, Restaurant,
                      OrderCreationRequest, OrderCreationResponse,
                      OrderUpdateRequest, OrderUpdateResponse)
 from .config import settings
+from .firehose import send_to_firehose
 
-app = FastAPI(title="DijkFood Order Service")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    session = aioboto3.Session()
+    async with session.client("firehose", region_name=settings.AWS_REGION) as firehose_client:
+        app.state.firehose_client = firehose_client
+        yield
+
+app = FastAPI(title="DijkFood Order Service", lifespan = lifespan)
 
 
 @app.get("/healthz", tags=["ops"])
@@ -37,7 +48,12 @@ async def get_db():
             await session.close()
 
 @app.post("/order", response_model = OrderCreationResponse)
-async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get_db)):
+async def create_order(
+    req: OrderCreationRequest, 
+    request: Request, 
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
 
     stmt = select(Restaurant).where(Restaurant.ID_restaurant == req.id_restaurant)
     restaurant_result = await db.execute(stmt)
@@ -95,6 +111,16 @@ async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get
         db.add(new_event)
         await db.commit()
         
+        order_data = {
+            "id_order": new_order.ID_order,
+            "created_at": new_order.created_at,
+            "id_restaurant": new_order.ID_restaurant,
+            "id_user": new_order.ID_user,
+            "id_courier": new_order.ID_courier,
+            "id_last_state": new_order.ID_last_state
+        }
+        background_tasks.add_task(send_to_firehose, request, "Order", "CREATE", order_data)
+
         return {"id_order": new_order.ID_order, "id_courier": courier["ID_courier"]}
         
     except Exception as e:
@@ -106,6 +132,8 @@ async def create_order(req: OrderCreationRequest, db: AsyncSession = Depends(get
 @app.patch("/order", response_model = OrderUpdateResponse)
 async def update_order(
     req: OrderUpdateRequest, 
+    request: Request, 
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     if req.id_state < 2 or req.id_state > 6:
@@ -140,6 +168,12 @@ async def update_order(
         await db.commit()
         row_dict = updated_row._mapping
         
+        update_data = {
+            "id_order": row_dict["id_order"],
+            "id_state": row_dict["id_state"]
+        }
+        background_tasks.add_task(send_to_firehose, request, "Order", "UPDATE", update_data)
+
         return {"id_order": row_dict["id_order"], "id_state": row_dict["id_state"]}
         
     except Exception as e:
