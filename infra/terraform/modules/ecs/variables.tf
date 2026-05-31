@@ -96,12 +96,12 @@ variable "graph_bucket_arn" {
 # core-api sizing
 variable "core_api_cpu" {
   type    = number
-  default = 512
+  default = 2048
 }
 
 variable "core_api_memory" {
   type    = number
-  default = 1024
+  default = 4096
 }
 
 variable "core_api_desired" {
@@ -132,17 +132,17 @@ variable "routing_memory" {
 
 variable "routing_desired" {
   type    = number
-  default = 2
+  default = 6
 }
 
 variable "routing_min" {
   type    = number
-  default = 1
+  default = 6
 }
 
 variable "routing_max" {
   type    = number
-  default = 6
+  default = 12
 }
 
 # tracking-service sizing
@@ -158,17 +158,17 @@ variable "tracking_memory" {
 
 variable "tracking_desired" {
   type    = number
-  default = 1
+  default = 2
 }
 
 variable "tracking_min" {
   type    = number
-  default = 1
+  default = 2
 }
 
 variable "tracking_max" {
   type    = number
-  default = 2
+  default = 4
 }
 
 # order-service sizing
@@ -184,17 +184,17 @@ variable "order_memory" {
 
 variable "order_desired" {
   type    = number
-  default = 1
+  default = 2
 }
 
 variable "order_min" {
   type    = number
-  default = 1
+  default = 2
 }
 
 variable "order_max" {
   type    = number
-  default = 2
+  default = 8
 }
 
 variable "execution_role_arn" {
