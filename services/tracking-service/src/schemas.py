@@ -19,3 +19,6 @@ class NearbyCourierRequest(BaseModel):
 class StatusUpdate(BaseModel):
     ID_courier: int
     status: CourierStatus
+
+class ClaimRequest(BaseModel):
+    ID_courier: int

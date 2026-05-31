@@ -182,3 +182,70 @@ variable "order_max" {
   type        = number
   default     = 60
 }
+
+# ---------- dashboard-service (Objetivo 3) ----------
+
+variable "dashboard_cpu" {
+  description = "CPU units for dashboard-service task"
+  type        = number
+  default     = 512
+}
+
+variable "dashboard_memory" {
+  description = "Memory (MiB) for dashboard-service task"
+  type        = number
+  default     = 1024
+}
+
+variable "dashboard_desired" {
+  description = "Desired task count for dashboard-service"
+  type        = number
+  default     = 1
+}
+
+variable "dashboard_min" {
+  description = "Min task count for dashboard-service auto-scaling"
+  type        = number
+  default     = 1
+}
+
+variable "dashboard_max" {
+  description = "Max task count for dashboard-service auto-scaling"
+  type        = number
+  default     = 4
+}
+
+# ---------- prediction-service (Objetivo 3) ----------
+
+variable "prediction_cpu" {
+  description = "CPU units for prediction-service task"
+  type        = number
+  default     = 1024
+}
+
+variable "prediction_memory" {
+  description = "Memory (MiB) for prediction-service task"
+  type        = number
+  default     = 2048
+}
+
+variable "prediction_desired" {
+  description = "Desired task count for prediction-service"
+  type        = number
+  default     = 1
+}
+
+variable "prediction_min" {
+  description = "Min task count for prediction-service auto-scaling"
+  type        = number
+  default     = 1
+}
+
+# Réplica única: o modelo é estado em memória e /predict/train só atualiza a
+# réplica sorteada pelo ALB. Inferência sklearn em memória é baratíssima, então
+# 1 task aguenta o QPS de sobra. (Escalar exigiria recarregar o modelo do S3.)
+variable "prediction_max" {
+  description = "Max task count for prediction-service (mantido em 1: modelo em memória)"
+  type        = number
+  default     = 1
+}

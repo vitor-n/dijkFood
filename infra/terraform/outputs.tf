@@ -59,8 +59,50 @@ output "order_service_name" {
   value       = module.ecs.order_service_name
 }
 
+output "dashboard_service_name" {
+  description = "ECS service name for dashboard-service"
+  value       = module.ecs.dashboard_service_name
+}
+
+output "prediction_service_name" {
+  description = "ECS service name for prediction-service"
+  value       = module.ecs.prediction_service_name
+}
+
+output "dashboard_url" {
+  description = "URL do dashboard analítico (Objetivo 3)"
+  value       = "http://${module.alb.dns_name}/dashboard"
+}
+
 output "load_tester_instance_id" {
   description = "ID da EC2 responsável pelo teste de carga"
   value       = module.load_tester.instance_id
+}
+
+# ---------- Analytics layer (Objetivo 3) ----------
+
+output "firehose_stream_name" {
+  description = "Firehose (DirectPut) que entrega eventos em Parquet no datalake"
+  value       = module.datalake.firehose_stream_name
+}
+
+output "datalake_bucket_name" {
+  description = "Bucket S3 do data lake analítico"
+  value       = module.datalake.datalake_bucket_name
+}
+
+output "glue_database_name" {
+  description = "Glue Data Catalog database"
+  value       = module.datalake.glue_database_name
+}
+
+output "athena_workgroup_name" {
+  description = "Athena workgroup para consultas analíticas"
+  value       = module.datalake.athena_workgroup_name
+}
+
+output "position_forwarder_function_name" {
+  description = "Lambda que faz CDC do DynamoDB Streams para o Firehose"
+  value       = module.analytics_lambdas.position_forwarder_function_name
 }
 

@@ -29,3 +29,11 @@ output "tracking_service_name" {
 output "order_service_name" {
   value = aws_ecs_service.order.name
 }
+
+output "dashboard_service_name" {
+  value = aws_ecs_service.dashboard.name
+}
+
+output "prediction_service_name" {
+  value = aws_ecs_service.prediction.name
+}

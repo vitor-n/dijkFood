@@ -20,15 +20,15 @@ resource "aws_security_group" "load_tester" {
 }
 
 resource "aws_instance" "main" {
-  ami                    = data.aws_ami.amazon_linux.id
-  
+  ami = data.aws_ami.amazon_linux.id
 
-  instance_type          = var.instance_type 
-  
+
+  instance_type = var.instance_type
+
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.load_tester.id]
-  
-  iam_instance_profile   = "LabInstanceProfile"
+
+  iam_instance_profile = "LabInstanceProfile"
 
   user_data = <<-EOF
     #!/bin/bash

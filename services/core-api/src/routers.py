@@ -19,7 +19,7 @@ from .schemas import (
     ItemCreateSchema,
     ItemResponseSchema,
 )
-from .firehose import send_to_firehose
+from .firehose import dispatch
 
 router = APIRouter()
 
@@ -152,18 +152,11 @@ async def add_menu_item(
     await session.commit()
     await session.refresh(item)
 
-    item_data = {
-        "id_item": item.id_item,
-        "name": item.name,
-        "id_restaurant": item.id_restaurant
-    }
-    background_tasks.add_task(
-        send_to_firehose, 
-        request, 
-        "MenuItem", 
-        "CREATE", 
-        item_data
-    )
+    # Evento analítico canônico (fire-and-forget; não bloqueia a resposta).
+    background_tasks.add_task(dispatch, request, {
+        "event_type": "menu_item_created",
+        "restaurant_id": item.id_restaurant,
+    })
 
     return ItemResponseSchema(
         id_item=item.id_item,

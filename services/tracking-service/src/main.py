@@ -14,7 +14,7 @@ import h3
 import aioboto3
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 
-from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest, StatusUpdate
+from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest, StatusUpdate, ClaimRequest
 from .config import settings
 from .repository import CourierRepository
 from .config import settings
@@ -70,6 +70,20 @@ async def update_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"message": "status captured"}
+
+
+@app.post("/tracking/claim")
+async def claim_courier(
+    req: ClaimRequest,
+    repo: CourierRepository = Depends(get_courier_repo),
+):
+    """Reivindica um courier atomicamente (AVAILABLE→BUSY). Retorna claimed=False
+    se outro pedido já o pegou — o chamador tenta o próximo candidato."""
+    try:
+        claimed = await repo.claim(req.ID_courier)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"claimed": claimed, "ID_courier": req.ID_courier}
 
 
 @app.get("/tracking/nearby")

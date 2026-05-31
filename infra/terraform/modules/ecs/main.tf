@@ -380,6 +380,7 @@ resource "aws_ecs_task_definition" "order" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },
+      { name = "PREDICTION_SERVICE_ENDPOINT", value = "http://${var.alb_dns_name}/" },
     ]
 
     logConfiguration = {
@@ -548,6 +549,227 @@ resource "aws_appautoscaling_policy" "order_requests" {
       resource_label         = var.order_alb_resource_label
     }
     target_value       = 50.0
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
+
+# ──────────────────────────────────────────────
+#  dashboard-service (Objetivo 3 — camada analítica)
+# ──────────────────────────────────────────────
+
+resource "aws_cloudwatch_log_group" "dashboard" {
+  name              = "/ecs/${var.project_name}/dashboard-service"
+  retention_in_days = 7
+}
+
+resource "aws_ecs_task_definition" "dashboard" {
+  family                   = "${var.project_name}-dashboard"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.dashboard_cpu
+  memory                   = var.dashboard_memory
+  execution_role_arn       = var.execution_role_arn
+  task_role_arn            = var.task_role_arn
+
+  container_definitions = jsonencode([{
+    name  = "dashboard-service"
+    image = "${var.dashboard_service_image}:latest"
+
+    portMappings = [{ containerPort = 8004, protocol = "tcp" }]
+
+    environment = [
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "ATHENA_WORKGROUP", value = var.athena_workgroup },
+      { name = "GLUE_DATABASE", value = var.glue_database },
+      { name = "EVENTS_TABLE", value = "events" },
+    ]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.dashboard.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+
+    healthCheck = {
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/healthz')\" || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
+
+    essential = true
+  }])
+}
+
+resource "aws_ecs_service" "dashboard" {
+  name                   = "${var.project_name}-dashboard"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.dashboard.arn
+  desired_count          = var.dashboard_desired
+  launch_type            = "FARGATE"
+  enable_execute_command = true
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_security_group_id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = var.dashboard_target_group_arn
+    container_name   = "dashboard-service"
+    container_port   = 8004
+  }
+
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 200
+  health_check_grace_period_seconds  = 60
+
+  lifecycle { ignore_changes = [desired_count, task_definition] }
+}
+
+resource "aws_appautoscaling_target" "dashboard" {
+  max_capacity       = var.dashboard_max
+  min_capacity       = var.dashboard_min
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.dashboard.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "dashboard_cpu" {
+  name               = "${var.project_name}-dashboard-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.dashboard.resource_id
+  scalable_dimension = aws_appautoscaling_target.dashboard.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.dashboard.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 60.0
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
+
+# ──────────────────────────────────────────────
+#  prediction-service (Objetivo 3 — capacidade preditiva)
+# ──────────────────────────────────────────────
+
+resource "aws_cloudwatch_log_group" "prediction" {
+  name              = "/ecs/${var.project_name}/prediction-service"
+  retention_in_days = 7
+}
+
+resource "aws_ecs_task_definition" "prediction" {
+  family                   = "${var.project_name}-prediction"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.prediction_cpu
+  memory                   = var.prediction_memory
+  execution_role_arn       = var.execution_role_arn
+  task_role_arn            = var.task_role_arn
+
+  container_definitions = jsonencode([{
+    name  = "prediction-service"
+    image = "${var.prediction_service_image}:latest"
+
+    portMappings = [{ containerPort = 8005, protocol = "tcp" }]
+
+    environment = [
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "ATHENA_WORKGROUP", value = var.athena_workgroup },
+      { name = "GLUE_DATABASE", value = var.glue_database },
+      { name = "EVENTS_TABLE", value = "events" },
+      { name = "MODEL_BUCKET", value = var.model_bucket },
+    ]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.prediction.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+
+    healthCheck = {
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8005/healthz')\" || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 90
+    }
+
+    essential = true
+  }])
+}
+
+resource "aws_ecs_service" "prediction" {
+  name                   = "${var.project_name}-prediction"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.prediction.arn
+  desired_count          = var.prediction_desired
+  launch_type            = "FARGATE"
+  enable_execute_command = true
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_security_group_id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = var.prediction_target_group_arn
+    container_name   = "prediction-service"
+    container_port   = 8005
+  }
+
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 200
+  health_check_grace_period_seconds  = 90
+
+  lifecycle { ignore_changes = [desired_count, task_definition] }
+}
+
+resource "aws_appautoscaling_target" "prediction" {
+  max_capacity       = var.prediction_max
+  min_capacity       = var.prediction_min
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.prediction.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "prediction_cpu" {
+  name               = "${var.project_name}-prediction-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.prediction.resource_id
+  scalable_dimension = aws_appautoscaling_target.prediction.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.prediction.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 60.0
     scale_in_cooldown  = 120
     scale_out_cooldown = 60
   }

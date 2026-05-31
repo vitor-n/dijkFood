@@ -94,6 +94,52 @@ resource "aws_lb_target_group" "tracking" {
   tags                 = { Service = "tracking-service" }
 }
 
+resource "aws_lb_target_group" "dashboard" {
+  name        = "${var.project_name}-dashboard"
+  port        = 8004
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 10
+    interval            = 30
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+  tags                 = { Service = "dashboard-service" }
+}
+
+resource "aws_lb_target_group" "prediction" {
+  name        = "${var.project_name}-prediction"
+  port        = 8005
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 10
+    interval            = 30
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+  tags                 = { Service = "prediction-service" }
+}
+
 resource "aws_lb_target_group" "routing" {
   name        = "${var.project_name}-routing"
   port        = 8001
@@ -142,6 +188,34 @@ resource "aws_lb_listener_rule" "order_service" {
 
   condition {
     path_pattern { values = ["/order", "/order/*"] }
+  }
+}
+
+resource "aws_lb_listener_rule" "dashboard_service" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 130
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.dashboard.arn
+  }
+
+  condition {
+    path_pattern { values = ["/dashboard", "/dashboard/*"] }
+  }
+}
+
+resource "aws_lb_listener_rule" "prediction_service" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 140
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.prediction.arn
+  }
+
+  condition {
+    path_pattern { values = ["/predict", "/predict/*"] }
   }
 }
 

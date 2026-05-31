@@ -22,6 +22,29 @@ class CourierRepository:
     def __init__(self, table):
         self.table = table
 
+    async def claim(self, ID_courier: int) -> bool:
+        """Reivindica um courier de forma ATÔMICA: AVAILABLE → BUSY apenas se
+        ainda estiver disponível. Evita a corrida em que dois pedidos
+        concorrentes pegam o mesmo entregador. Retorna True se conseguiu."""
+        from botocore.exceptions import ClientError
+        try:
+            await self.table.update_item(
+                Key={"ID_courier": ID_courier},
+                UpdateExpression="SET #s = :busy, updated_at = :now",
+                ConditionExpression="attribute_exists(ID_courier) AND #s = :avail",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":busy": CourierStatus.BUSY.value,
+                    ":avail": CourierStatus.AVAILABLE.value,
+                    ":now": int(time.time() * 1000),
+                },
+            )
+            return True
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False  # já estava ocupado/inexistente → tenta o próximo
+            raise
+
     async def update_status(self, ID_courier: int, status: CourierStatus):
         await self.table.update_item(
             Key={

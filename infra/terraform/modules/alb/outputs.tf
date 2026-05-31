@@ -46,3 +46,19 @@ output "order_target_group_arn" {
 output "order_target_group_arn_suffix" {
   value = aws_lb_target_group.order.arn_suffix
 }
+
+output "dashboard_target_group_arn" {
+  value = aws_lb_target_group.dashboard.arn
+}
+
+output "dashboard_target_group_arn_suffix" {
+  value = aws_lb_target_group.dashboard.arn_suffix
+}
+
+output "prediction_target_group_arn" {
+  value = aws_lb_target_group.prediction.arn
+}
+
+output "prediction_target_group_arn_suffix" {
+  value = aws_lb_target_group.prediction.arn_suffix
+}

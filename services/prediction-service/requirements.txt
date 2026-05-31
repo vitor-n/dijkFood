@@ -1,0 +1,6 @@
+boto3
+fastapi
+joblib
+numpy
+scikit-learn
+uvicorn[standard]

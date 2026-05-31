@@ -24,6 +24,13 @@ class Settings:
         "TRACKING_SERVICE_ENDPOINT",
         "http://127.0.0.1:8002/",
     )
-    FIREHOSE_STREAM_NAME: str = os.environ.get("FIREHOSE_STREAM_NAME", "PUT-S3-4k3iv")
 
+    # Camada analítica (Objetivo 3): destino do Firehose. Vazio => dispatch no-op.
+    FIREHOSE_STREAM_NAME: str = os.environ.get("FIREHOSE_STREAM_NAME", "")
+
+    # Capacidade preditiva (Objetivo 3): vazio => sem chamada (usa fallback).
+    PREDICTION_SERVICE_ENDPOINT: str = os.environ.get("PREDICTION_SERVICE_ENDPOINT", "")
+    PREDICTION_TIMEOUT_S: float = float(os.environ.get("PREDICTION_TIMEOUT_S", "0.3"))
+    # Fração de pedidos enriquecidos com ETA previsto (limita carga de predição).
+    PREDICTION_SAMPLE_RATE: float = float(os.environ.get("PREDICTION_SAMPLE_RATE", "1.0"))
 settings = Settings()

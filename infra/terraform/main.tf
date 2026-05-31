@@ -3,7 +3,9 @@ locals {
     "core-api",
     "routing-service",
     "tracking-service",
-    "order-service"
+    "order-service",
+    "dashboard-service",
+    "prediction-service"
   ]
   database_url = "postgresql+asyncpg://${var.db_username}:${var.db_password}@${module.rds.endpoint}:5432/dijkfood"
 }
@@ -37,7 +39,7 @@ resource "aws_security_group" "ecs_tasks" {
   ingress {
     protocol        = "tcp"
     from_port       = 8000
-    to_port         = 8003
+    to_port         = 8005
     security_groups = [aws_security_group.alb.id]
   }
 
@@ -163,6 +165,7 @@ module "datalake" {
 
   project_name = var.project_name
   environment  = var.environment
+  aws_region   = var.aws_region
 
   firehose_role_arn = data.aws_iam_role.lab_role.arn
 }
@@ -195,15 +198,19 @@ module "ecs" {
   execution_role_arn = data.aws_iam_role.lab_role.arn
   task_role_arn      = data.aws_iam_role.lab_role.arn
 
-  core_api_image         = module.ecr.repository_urls["core-api"]
-  routing_service_image  = module.ecr.repository_urls["routing-service"]
-  tracking_service_image = module.ecr.repository_urls["tracking-service"]
-  order_service_image    = module.ecr.repository_urls["order-service"]
+  core_api_image           = module.ecr.repository_urls["core-api"]
+  routing_service_image    = module.ecr.repository_urls["routing-service"]
+  tracking_service_image   = module.ecr.repository_urls["tracking-service"]
+  order_service_image      = module.ecr.repository_urls["order-service"]
+  dashboard_service_image  = module.ecr.repository_urls["dashboard-service"]
+  prediction_service_image = module.ecr.repository_urls["prediction-service"]
 
-  core_api_target_group_arn = module.alb.core_api_target_group_arn
-  routing_target_group_arn  = module.alb.routing_target_group_arn
-  tracking_target_group_arn = module.alb.tracking_target_group_arn
-  order_target_group_arn    = module.alb.order_target_group_arn
+  core_api_target_group_arn   = module.alb.core_api_target_group_arn
+  routing_target_group_arn    = module.alb.routing_target_group_arn
+  tracking_target_group_arn   = module.alb.tracking_target_group_arn
+  order_target_group_arn      = module.alb.order_target_group_arn
+  dashboard_target_group_arn  = module.alb.dashboard_target_group_arn
+  prediction_target_group_arn = module.alb.prediction_target_group_arn
 
   core_api_alb_resource_label = "${module.alb.arn_suffix}/${module.alb.core_api_target_group_arn_suffix}"
   routing_alb_resource_label  = "${module.alb.arn_suffix}/${module.alb.routing_target_group_arn_suffix}"
@@ -219,6 +226,22 @@ module "ecs" {
   graph_bucket_arn    = module.s3.graph_bucket_arn
 
   firehose_stream_name = module.datalake.firehose_stream_name
+
+  athena_workgroup = module.datalake.athena_workgroup_name
+  glue_database    = module.datalake.glue_database_name
+  model_bucket     = module.datalake.datalake_bucket_name
+
+  dashboard_cpu     = var.dashboard_cpu
+  dashboard_memory  = var.dashboard_memory
+  dashboard_desired = var.dashboard_desired
+  dashboard_min     = var.dashboard_min
+  dashboard_max     = var.dashboard_max
+
+  prediction_cpu     = var.prediction_cpu
+  prediction_memory  = var.prediction_memory
+  prediction_desired = var.prediction_desired
+  prediction_min     = var.prediction_min
+  prediction_max     = var.prediction_max
 
   core_api_cpu     = var.core_api_cpu
   core_api_memory  = var.core_api_memory
@@ -251,9 +274,23 @@ module "ecs" {
 # ──────────────────────────────────
 
 module "load_tester" {
-  source    = "./modules/ec2"
-  vpc_id    = module.networking.vpc_id
-  subnet_id = module.networking.public_subnet_ids[0] 
+  source        = "./modules/ec2"
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
   instance_type = var.load_tester_instance_type
   alb_dns       = module.alb.dns_name
+}
+
+# ──────────────────────────────────────────────
+#  Lambda — DynamoDB Streams (CDC posições) → Firehose
+# ──────────────────────────────────────────────
+
+module "analytics_lambdas" {
+  source = "./modules/lambda"
+
+  project_name         = var.project_name
+  aws_region           = var.aws_region
+  lab_role_arn         = data.aws_iam_role.lab_role.arn
+  dynamodb_stream_arn  = module.dynamodb.courier_positions_stream_arn
+  firehose_stream_name = module.datalake.firehose_stream_name
 }

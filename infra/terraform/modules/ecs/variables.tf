@@ -40,6 +40,16 @@ variable "order_service_image" {
   type        = string
 }
 
+variable "dashboard_service_image" {
+  description = "ECR repository URL for dashboard-service"
+  type        = string
+}
+
+variable "prediction_service_image" {
+  description = "ECR repository URL for prediction-service"
+  type        = string
+}
+
 # Load Balancer
 variable "core_api_target_group_arn" {
   type = string
@@ -54,6 +64,14 @@ variable "tracking_target_group_arn" {
 }
 
 variable "order_target_group_arn" {
+  type = string
+}
+
+variable "dashboard_target_group_arn" {
+  type = string
+}
+
+variable "prediction_target_group_arn" {
   type = string
 }
 
@@ -187,6 +205,59 @@ variable "order_max" {
   type = number
 }
 
+# dashboard-service sizing
+variable "dashboard_cpu" {
+  type    = number
+  default = 512
+}
+
+variable "dashboard_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "dashboard_desired" {
+  type    = number
+  default = 1
+}
+
+variable "dashboard_min" {
+  type    = number
+  default = 1
+}
+
+variable "dashboard_max" {
+  type    = number
+  default = 4
+}
+
+# prediction-service sizing
+variable "prediction_cpu" {
+  type    = number
+  default = 1024
+}
+
+variable "prediction_memory" {
+  type    = number
+  default = 2048
+}
+
+variable "prediction_desired" {
+  type    = number
+  default = 1
+}
+
+variable "prediction_min" {
+  type    = number
+  default = 1
+}
+
+# Mantido em 1: o modelo é estado em memória por réplica (ver variables.tf raiz).
+variable "prediction_max" {
+  type    = number
+  default = 1
+}
+
 variable "execution_role_arn" {
   description = "Existing IAM role ARN for ECS task execution"
   type        = string
@@ -195,6 +266,24 @@ variable "execution_role_arn" {
 variable "task_role_arn" {
   description = "Existing IAM role ARN for ECS application task"
   type        = string
+}
+
+variable "athena_workgroup" {
+  description = "Athena workgroup usado pelo dashboard."
+  type        = string
+  default     = ""
+}
+
+variable "glue_database" {
+  description = "Glue database com a tabela de eventos."
+  type        = string
+  default     = ""
+}
+
+variable "model_bucket" {
+  description = "Bucket S3 onde o prediction-service persiste o modelo."
+  type        = string
+  default     = ""
 }
 
 variable "firehose_stream_name" {

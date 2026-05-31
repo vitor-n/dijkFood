@@ -16,7 +16,7 @@ from .models import (User, UserSchema,
                    Courier, CourierGeneralSchema, CourierCreationSchema,
                    async_session)
 from .routers import router as extra_router
-from .firehose import send_to_firehose
+from .firehose import dispatch
 
 from .config import settings
 
@@ -92,18 +92,13 @@ async def create_user_custom(
     await session.commit()
     await session.refresh(new_user)
 
-    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
-    user_data = new_user.__dict__.copy()
-    user_data.pop("_sa_instance_state", None)
-
-    # Dispara para o Firehose em segundo plano
-    background_tasks.add_task(
-        send_to_firehose,
-        request,
-        "User",
-        "CREATE",
-        user_data
-    )
+    # Evento analítico canônico (fire-and-forget; não bloqueia a resposta).
+    background_tasks.add_task(dispatch, request, {
+        "event_type": "user_created",
+        "user_id": new_user.id_user,
+        "lat": float(new_user.lat),
+        "lon": float(new_user.lon),
+    })
     return new_user
 
 
@@ -119,18 +114,15 @@ async def create_restaurant_custom(
     await session.commit()
     await session.refresh(new_restaurant)
 
-    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
-    restaurant_data = new_restaurant.__dict__.copy()
-    restaurant_data.pop("_sa_instance_state", None)
-
-    # Dispara para o Firehose em segundo plano
-    background_tasks.add_task(
-        send_to_firehose,
-        request,
-        "Restaurant",
-        "CREATE",
-        restaurant_data
-    )
+    # Evento analítico canônico (fire-and-forget; não bloqueia a resposta).
+    r_lat, r_lon = float(new_restaurant.lat), float(new_restaurant.lon)
+    background_tasks.add_task(dispatch, request, {
+        "event_type": "restaurant_created",
+        "restaurant_id": new_restaurant.id_restaurant,
+        "lat": r_lat,
+        "lon": r_lon,
+        "h3_cell": h3.latlng_to_cell(r_lat, r_lon, 8),
+    })
     return new_restaurant
 
 #Mágica do fastcrud para gerar os endpoints básicos
@@ -199,16 +191,15 @@ async def create_courier_custom(
     print(f"Escrever no Dynamo levou {duration // 1000000}ms.")
     await session.commit()
 
-    courier_data = courier_trimmed.__dict__.copy()
-    courier_data.pop("_sa_instance_state", None)
-    
-    background_tasks.add_task(
-        send_to_firehose, 
-        request, 
-        "Courier", 
-        "CREATE", 
-        courier_data
-    )
+    # Evento analítico canônico (fire-and-forget; não bloqueia a resposta).
+    background_tasks.add_task(dispatch, request, {
+        "event_type": "courier_created",
+        "courier_id": courier_trimmed.id_courier,
+        "lat": float(courier.lat),
+        "lon": float(courier.lon),
+        "h3_cell": h3.latlng_to_cell(courier.lat, courier.lon, 8),
+        "state_name": "AVAILABLE",
+    })
 
     return courier_trimmed
 

@@ -1,8 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, Depends
 import httpx
+import h3
 from contextlib import asynccontextmanager
 import aioboto3
-import json
 
 from sqlalchemy import text, select
 from sqlalchemy.orm import sessionmaker
@@ -15,14 +15,29 @@ from .models import (Order, OrderEvent, Restaurant,
                      OrderCreationRequest, OrderCreationResponse,
                      OrderUpdateRequest, OrderUpdateResponse)
 from .config import settings
-from .firehose import send_to_firehose
+from .events import EventEmitter
+
+# Mapa id_state -> nome (espelha OrderState do schema), usado nos eventos.
+STATE_NAMES = {
+    1: "CONFIRMED", 2: "PREPARING", 3: "READY_FOR_PICKUP",
+    4: "PICKED_UP", 5: "IN_TRANSIT", 6: "DELIVERED",
+}
+
+# Emissor analítico assíncrono e limitado (ver events.py).
+emitter = EventEmitter(settings.FIREHOSE_STREAM_NAME, sample_rate=settings.PREDICTION_SAMPLE_RATE)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     session = aioboto3.Session()
     async with session.client("firehose", region_name=settings.AWS_REGION) as firehose_client:
         app.state.firehose_client = firehose_client
-        yield
+        emitter.bind(firehose_client, predictor=get_predicted_eta)
+        await emitter.start()
+        try:
+            yield
+        finally:
+            await emitter.stop()
 
 app = FastAPI(title="DijkFood Order Service", lifespan = lifespan)
 
@@ -44,6 +59,25 @@ http_client = httpx.AsyncClient()
 with open("./order_update_query.sql") as f:
     UPDATE_SQL_QUERY = f.read()
 
+
+async def get_predicted_eta(restaurant_id: int, h3_cell: str | None) -> float | None:
+    """Consulta o prediction-service (Objetivo 3). Best-effort: timeout curto;
+    qualquer falha → None (a predição é enriquecimento, nunca caminho crítico)."""
+    if not settings.PREDICTION_SERVICE_ENDPOINT:
+        return None
+    try:
+        resp = await http_client.get(
+            urljoin(settings.PREDICTION_SERVICE_ENDPOINT, "predict/delivery-time"),
+            params={"restaurant_id": restaurant_id, "h3_cell": h3_cell or ""},
+            timeout=settings.PREDICTION_TIMEOUT_S,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("predicted_eta_s")
+    except Exception:
+        return None
+    return None
+
+
 async def get_db():
     async with async_session() as session:
         try:
@@ -53,9 +87,7 @@ async def get_db():
 
 @app.post("/order", response_model = OrderCreationResponse)
 async def create_order(
-    req: OrderCreationRequest, 
-    request: Request, 
-    background_tasks: BackgroundTasks,
+    req: OrderCreationRequest,
     db: AsyncSession = Depends(get_db)
 ):
 
@@ -82,17 +114,25 @@ async def create_order(
 
     if len(couriers["Items"]) == 0:
         raise HTTPException(status_code = 404, detail = "Não temos entregadores disponíveis")
-    
-    #TODO: Implement proper loop
-    for courier in couriers["Items"]:
-        response = await http_client.patch(
-            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-            json = {"ID_courier": courier["ID_courier"], "status": "BUSY"},
+
+    # Atribuição ATÔMICA: tenta reivindicar cada candidato até um sucesso. O
+    # claim (UpdateItem condicional AVAILABLE→BUSY) evita a corrida em que dois
+    # pedidos concorrentes pegam o mesmo entregador (o /nearby pode estar
+    # desatualizado sob concorrência).
+    courier = None
+    for candidate in couriers["Items"]:
+        response = await http_client.post(
+            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/claim"),
+            json = {"ID_courier": candidate["ID_courier"]},
             timeout = 2.0
         )
         response.raise_for_status()
-        print(response.json())
-        break
+        if response.json().get("claimed"):
+            courier = candidate
+            break
+
+    if courier is None:
+        raise HTTPException(status_code = 409, detail = "Entregadores disponíveis foram reivindicados por outros pedidos")
 
     try:
         new_order = Order(
@@ -115,15 +155,22 @@ async def create_order(
         db.add(new_event)
         await db.commit()
         
-        order_data = {
-            "id_order": new_order.ID_order,
-            "created_at": new_order.created_at,
-            "id_restaurant": new_order.ID_restaurant,
-            "id_user": new_order.ID_user,
-            "id_courier": new_order.ID_courier,
-            "id_last_state": new_order.ID_last_state
-        }
-        background_tasks.add_task(send_to_firehose, request, "Order", "CREATE", order_data)
+        # Emissão analítica O(1) e não-bloqueante (fila limitada). predict=True
+        # marca o evento p/ enriquecimento com ETA previsto (amostrado/limitado
+        # no worker), sem qualquer chamada de rede no caminho quente.
+        r_lat, r_lon = float(restaurant.lat), float(restaurant.lon)
+        emitter.emit({
+            "event_type": "order_created",
+            "order_id": new_order.ID_order,
+            "restaurant_id": new_order.ID_restaurant,
+            "user_id": new_order.ID_user,
+            "courier_id": new_order.ID_courier,
+            "state_id": 1,
+            "state_name": "CONFIRMED",
+            "lat": r_lat,
+            "lon": r_lon,
+            "h3_cell": h3.latlng_to_cell(r_lat, r_lon, 8),
+        }, predict=True)
 
         return {"id_order": new_order.ID_order, "id_courier": courier["ID_courier"]}
         
@@ -135,9 +182,7 @@ async def create_order(
 
 @app.patch("/order", response_model = OrderUpdateResponse)
 async def update_order(
-    req: OrderUpdateRequest, 
-    request: Request, 
-    background_tasks: BackgroundTasks,
+    req: OrderUpdateRequest,
     db: AsyncSession = Depends(get_db)
 ):
     if req.id_state < 2 or req.id_state > 6:
@@ -172,11 +217,13 @@ async def update_order(
         await db.commit()
         row_dict = updated_row._mapping
         
-        update_data = {
-            "id_order": row_dict["id_order"],
-            "id_state": row_dict["id_state"]
-        }
-        background_tasks.add_task(send_to_firehose, request, "Order", "UPDATE", update_data)
+        # Emissão analítica O(1) e não-bloqueante (fila limitada).
+        emitter.emit({
+            "event_type": "order_state_changed",
+            "order_id": row_dict["id_order"],
+            "state_id": row_dict["id_state"],
+            "state_name": STATE_NAMES.get(row_dict["id_state"]),
+        })
 
         return {"id_order": row_dict["id_order"], "id_state": row_dict["id_state"]}
         

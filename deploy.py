@@ -10,6 +10,7 @@ Comandos:
     python deploy.py plan      Apenas executa o `terraform plan` para análise da infraestrutura
     python deploy.py smoke     Faz só health checks no ALB (exige state/terraform output).
     python deploy.py simulate  Executa (na máquina EC2 criada na AWS) a simulação de requests
+    python deploy.py train     Dispara o (re)treino do modelo preditivo via prediction-service (ciclo de vida ML)
 
 Variáveis de ambiente:
     DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida). Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode ficar vazia se estiver só no TF_VAR_FILE.
@@ -176,6 +177,8 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
         "tracking-service": os.path.join("services", "tracking-service", "Dockerfile"),
         "order-service": os.path.join("services", "order-service", "Dockerfile"),
+        "dashboard-service": os.path.join("services", "dashboard-service", "Dockerfile"),
+        "prediction-service": os.path.join("services", "prediction-service", "Dockerfile"),
     }
 
     for service, dockerfile_path in services_dockerfiles.items():
@@ -190,12 +193,14 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     region = outputs["aws_region"]["value"]
     cluster = outputs["ecs_cluster_name"]["value"]
     
-    # Todos os 4 serviços incluídos na lista de atualização
+    # Todos os serviços incluídos na lista de atualização
     services_to_deploy = [
-        "core_api_service_name", 
+        "core_api_service_name",
         "routing_service_name",
         "tracking_service_name",
-        "order_service_name"
+        "order_service_name",
+        "dashboard_service_name",
+        "prediction_service_name"
     ]
     
     for svc_key in services_to_deploy:
@@ -232,7 +237,9 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
         (f"{base}/docs", "core-api OpenAPI"),
         (f"{base}/routes/healthz", "routing-service"),
         (f"{base}/tracking/nearby?lat=-23.55&lon=-46.63", "tracking-service (nearby)",),
-        (f"{base}/order", "order-service")
+        (f"{base}/order", "order-service"),
+        (f"{base}/dashboard/healthz", "dashboard-service"),
+        (f"{base}/predict/healthz", "prediction-service"),
     ]
 
     for url, label in urls:
@@ -376,6 +383,20 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
     except Exception as exc:
         print(f"  Falha ao iniciar/monitorar a simulação: {exc}")
 
+def stage_train_model(outputs: dict[str, Any]) -> None:
+    """Dispara o (re)treino do modelo preditivo (ciclo de vida ML do Objetivo 3)."""
+    print("\n═════════ Treinando o modelo preditivo (via prediction-service) ═════════")
+    alb_dns = outputs["alb_dns_name"]["value"]
+    url = f"http://{alb_dns}/predict/train"
+    try:
+        req = urllib.request.Request(url, data=b"", method="POST")
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            print(f"  Treino disparado ({url}) → HTTP {resp.status}")
+            print("  " + resp.read().decode("utf-8", errors="replace"))
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao treinar o modelo em {url}: {exc}") from exc
+
+
 def print_usage() -> None:
     print(__doc__)
 
@@ -386,7 +407,7 @@ def main() -> None:
         sys.exit(1)
 
     action = sys.argv[1].strip().lower()
-    valid = ("deploy", "update", "destroy", "all", "plan", "smoke", "help", "simulate", "-h", "--help")
+    valid = ("deploy", "update", "destroy", "all", "plan", "smoke", "help", "simulate", "train", "-h", "--help")
     if action in ("help", "-h", "--help"):
         print_usage()
         return
@@ -427,6 +448,11 @@ def main() -> None:
     if action == "simulate":
         out = tf_output()
         stage_run_load_test(out)
+        return
+
+    if action == "train":
+        out = tf_output()
+        stage_train_model(out)
         return
 
     if action == "all":
