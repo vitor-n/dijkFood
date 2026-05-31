@@ -84,7 +84,7 @@ variable "core_api_desired" {
 variable "core_api_min" {
   description = "Min task count for core-api auto-scaling"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "core_api_max" {
@@ -148,13 +148,13 @@ variable "tracking_memory" {
 variable "tracking_desired" {
   description = "Desired task count for tracking-service"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "tracking_min" {
   description = "Min task count for tracking-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "tracking_max" {
