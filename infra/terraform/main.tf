@@ -8,6 +8,10 @@ locals {
   database_url = "postgresql+asyncpg://${var.db_username}:${var.db_password}@${module.rds.endpoint}:5432/dijkfood"
 }
 
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
+}
+
 # ──────────────────────────────────────────────
 #  Networking (VPC, subnets, IGW, NAT)
 # ──────────────────────────────────────────────
@@ -152,6 +156,18 @@ module "dynamodb" {
 }
 
 # ──────────────────────────────────────────────
+#  Datalake (S3 + Firehose)
+# ──────────────────────────────────────────────
+module "datalake" {
+  source = "./modules/datalake"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  firehose_role_arn = data.aws_iam_role.lab_role.arn
+}
+
+# ──────────────────────────────────────────────
 #  ALB — Application Load Balancer
 # ──────────────────────────────────────────────
 
@@ -176,8 +192,8 @@ module "ecs" {
   private_subnet_ids    = module.networking.private_subnet_ids
   ecs_security_group_id = aws_security_group.ecs_tasks.id
 
-  execution_role_arn = var.execution_role_arn
-  task_role_arn      = var.task_role_arn
+  execution_role_arn = data.aws_iam_role.lab_role.arn
+  task_role_arn      = data.aws_iam_role.lab_role.arn
 
   core_api_image         = module.ecr.repository_urls["core-api"]
   routing_service_image  = module.ecr.repository_urls["routing-service"]
@@ -201,6 +217,8 @@ module "ecs" {
   dynamodb_table_arn  = module.dynamodb.courier_positions_table_arn
   graph_bucket_name   = module.s3.graph_bucket_name
   graph_bucket_arn    = module.s3.graph_bucket_arn
+
+  firehose_stream_name = module.datalake.firehose_stream_name
 
   core_api_cpu     = var.core_api_cpu
   core_api_memory  = var.core_api_memory

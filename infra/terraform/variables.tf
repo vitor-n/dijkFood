@@ -123,16 +123,6 @@ variable "routing_max" {
   default     = 60
 }
 
-variable "execution_role_arn" {
-  description = "Existing IAM execution role ARN for ECS tasks"
-  type        = string
-}
-
-variable "task_role_arn" {
-  description = "Existing IAM task role ARN for ECS tasks"
-  type        = string
-}
-
 variable "tracking_cpu" {
   description = "CPU units for tracking-service task"
   type        = number

@@ -196,3 +196,8 @@ variable "task_role_arn" {
   description = "Existing IAM role ARN for ECS application task"
   type        = string
 }
+
+variable "firehose_stream_name" {
+  description = "Nome do stream do Firehose para os serviços publicarem eventos"
+  type        = string
+}

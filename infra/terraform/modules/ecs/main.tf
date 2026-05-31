@@ -76,6 +76,7 @@ resource "aws_ecs_task_definition" "core_api" {
       { name = "DYNAMO_TABLE", value = var.dynamodb_table_name },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },
     ]
 
     logConfiguration = {
@@ -378,6 +379,7 @@ resource "aws_ecs_task_definition" "order" {
       { name = "TRACKING_SERVICE_ENDPOINT", value = "http://${var.alb_dns_name}/" },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },
     ]
 
     logConfiguration = {
