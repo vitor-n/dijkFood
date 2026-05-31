@@ -109,9 +109,11 @@ class Metrics:
             "status": status
         })
 
-    def report(self, config: SimConfig):
+    def report(self, config: SimConfig, duration_seconds: Optional[float] = None):
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
+        if duration_seconds is not None:
+            print(f"Tempo total desde o início até finalizar: {duration_seconds:.1f}s")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
         print(f"Pedidos não criados: {self.orders_not_created}")
         print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
@@ -163,7 +165,6 @@ metrics = Metrics()
 async def _request(
     client: httpx.AsyncClient, method: str, base_url: str, path: str, sem: asyncio.Semaphore, config: SimConfig, **kwargs
 ):
-    """Executa requisição com Retry, medindo latência exata."""
     url = f"{base_url}{path}"
     
     for attempt in range(1, config.max_retries + 1):
@@ -172,20 +173,22 @@ async def _request(
             try:
                 resp = await client.request(method, url, **kwargs)
                 latency = (time.perf_counter() - t0) * 1000
+                
+                # Registra latência apenas de requisições concluídas
                 metrics.record_latency(path, method, latency, resp.status_code)
                 
                 if resp.status_code in (200, 201):
                     try: return resp.json()
                     except: return {}
-                else:
-                    return None
+                return None
+                
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                latency = (time.perf_counter() - t0) * 1000
-                metrics.record_latency(path, method, latency, 0)
+                # Apenas incrementa erro, evita sujar estatísticas com tempo de timeout local
                 metrics.errors += 1
                 
         if attempt < config.max_retries:
             await asyncio.sleep(0.3 * (2 ** (attempt - 1)))
+            
     return None
 
 async def fetch_route(client, sem, config, orig_lat, orig_lon, dest_lat, dest_lon):
@@ -313,8 +316,9 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
     users = []
     rests = []
     
+    MAX_PAGES = 100 # Limite para evitar loops infinitos em caso de falhas no endpoint
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
         if u_body:
             users.extend([u["id_user"] for u in u_body.get("data", [])])
@@ -326,7 +330,7 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
             break
 
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)    
         if r_body:
             rests.extend([r["id_restaurant"] for r in r_body.get("data", [])])
@@ -369,6 +373,7 @@ async def order_emitter(client, users, restaurants, config):
 
 async def main():
     config = SimConfig()
+    sim_start = time.perf_counter()
 
     if config.silent:
         logging.getLogger("httpx").setLevel(logging.ERROR)
@@ -387,8 +392,9 @@ async def main():
 
         log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
         await order_emitter(client, users, restaurants, config)
-        
-    metrics.report(config)
+
+    total_duration = time.perf_counter() - sim_start
+    metrics.report(config, total_duration)
 
 if __name__ == "__main__":
     print(BASE_URL)
