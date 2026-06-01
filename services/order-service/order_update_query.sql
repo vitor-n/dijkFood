@@ -1,16 +1,18 @@
 WITH updated_order AS (
     UPDATE Orders
-    SET ID_last_state = CAST(:id_novo_estado AS INTEGER)
-    WHERE ID_order = CAST(:id_pedido AS INTEGER)
-      AND ID_last_state = CAST(:id_estado_antigo_esperado AS INTEGER)
-    RETURNING ID_order, CAST(:id_novo_estado AS INTEGER) AS ID_state, CURRENT_TIMESTAMP AS changed_at
+    SET ID_last_state = :id_novo_estado
+    WHERE ID_order = :id_pedido
+      AND ID_last_state = :id_estado_antigo_esperado
+    -- Retorna ID_courier aqui para evitar SELECT extra no Python
+    RETURNING ID_order, ID_courier, :id_novo_estado AS ID_state, CURRENT_TIMESTAMP AS changed_at
+), inserted_event AS (
+  INSERT INTO OrderEvents (changed_at, ID_order, ID_state)
+  SELECT
+    changed_at,
+    ID_order,
+    ID_state
+  FROM updated_order
+  RETURNING ID_order, ID_state
 )
-
-INSERT INTO OrderEvents (ID_event, changed_at, ID_order, ID_state)
-SELECT 
-    nextval('orderevents_id_event_seq'),  --nextval('orderevents_id_seq') não sei qual nome ele cria por padrão, testei mudando na mão então coloquei o nome que criei na mão
-    changed_at, 
-    ID_order, 
-    ID_state 
-FROM updated_order
-RETURNING ID_order, ID_state;
+SELECT ID_order, ID_courier, ID_state
+FROM updated_order;
