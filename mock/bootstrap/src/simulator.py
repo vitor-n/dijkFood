@@ -1,13 +1,11 @@
 """
 DijkFood - Simulador de Carga e Ciclo de Vida
 =================================================
-Versão Final: Combina os endpoints corretos de microsserviços com a 
-emissão cadenciada, delays realistas e métricas granulares por rota.
 
 Uso:
-  python load_simulator.py                 # cenário padrão (10 req/s)
-  SCENARIO=peak python load_simulator.py   # 50 req/s
-  SCENARIO=event python load_simulator.py  # 200 req/s
+  python simulator.py                 # cenário padrão (10 req/s)
+  SCENARIO=peak python simulator.py   # 50 req/s
+  SCENARIO=event python simulator.py  # 200 req/s
 """
 
 import asyncio
@@ -31,7 +29,7 @@ from utils import get_random_sp_coordinate
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("simulator")
@@ -69,10 +67,10 @@ class SimConfig:
     orders_per_second: float = 0.0
     duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
-    delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
-    delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
-    delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
-    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
+    delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 5.0))
+    delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 10.0))
+    delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 5.0))
+    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 10.0))
     tracking_lifetime: float = float(os.getenv("TRACKING_LIFETIME", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
@@ -88,7 +86,7 @@ class SimConfig:
         self.orders_per_second = scenarios_mapping.get(self.scenario, self.orders_per_second)
 
 # ---------------------------------------------------------------------------
-# Métricas Granulares (Para provar isolamento)
+# Métricas Granulares
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -268,7 +266,7 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
         log.warning(f"Falha ao avançar para READY_FOR_PICKUP no pedido {order_id}. Finalizando execução sem simular rota.")
         return
     ## Estado 3 -> 4 (READY_FOR_PICKUP -> PICKED_UP)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(5.0)
     result = await advance(OrderState.PICKED_UP)
     if not result:
         metrics.orders_failed += 1
