@@ -33,7 +33,7 @@ CREATE TABLE Restaurants
   name VARCHAR(128) NOT NULL,
   lat DECIMAL(10, 8) NOT NULL,
   lon DECIMAL(11, 8) NOT NULL,
-  H3_index INT NOT NULL,
+  H3_index BIGINT NOT NULL,
   ID_cuisine_type INT NOT NULL,
   PRIMARY KEY (ID_restaurant),
   FOREIGN KEY (ID_cuisine_type) REFERENCES CuisineTypes(ID_cuisine_type)
@@ -107,3 +107,8 @@ CREATE TABLE OrderItems
   FOREIGN KEY (ID_item) REFERENCES Items(ID_item),
   FOREIGN KEY (ID_order) REFERENCES Orders(ID_order)
 );
+
+CREATE INDEX idx_orders_user_created ON Orders (ID_user, created_at DESC);
+CREATE INDEX idx_order_events_order ON OrderEvents (ID_order);
+CREATE INDEX idx_items_restaurant ON Items (ID_restaurant);
+CREATE INDEX idx_orders_courier ON Orders (ID_courier);

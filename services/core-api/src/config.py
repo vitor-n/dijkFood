@@ -18,7 +18,6 @@ class Settings:
     
     DYNAMO_TABLE:    str = os.environ.get("DYNAMO_TABLE", "CourierTracking")
     DYNAMO_ENDPOINT: str = os.environ.get("DYNAMO_ENDPOINT", "dynamodb.us-east-1.amazonaws.com")
-    
-    POSTGRES_ENDPOINT: str = os.environ.get("POSTGRES_ENDPOINT", "postgresql+asyncpg://admin_user:Ihateavroformat69@dijkfood-db.cp2a4as0eh8g.us-east-1.rds.amazonaws.com:5432/production")
+    POSTGRES_ENDPOINT: str = _database_url()
 
 settings = Settings()

@@ -19,30 +19,9 @@ from .routers import router as extra_router
 
 from .config import settings
 
-#Isso é para rodar o DDL e DML no banco
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Iniciando setup do banco de dados...")
-    try:
-        with open("sql/schema.sql", "r", encoding="utf-8") as f:
-            schema_sql = f.read()
-        with open("sql/lookup-data.sql", "r", encoding="utf-8") as f:
-            seed_sql = f.read()
-
-        url = settings.POSTGRES_ENDPOINT.replace("+asyncpg", "")
-
-        conn = await asyncpg.connect(url)
-        try:
-            await conn.execute(schema_sql)
-            await conn.execute(seed_sql)
-            print("Setup do banco de dados concluido com sucesso!")
-        finally:
-            await conn.close()
-            
-    except Exception as e:
-        print(f"Erro ao inicializar o banco de dados: {e}")
-        
-    #Cria o pool de conexoes uma unica vez para toda a execução da API
+    # Cria o pool de conexões com o DynamoDB uma única vez para toda a execução da API
     session = aioboto3.Session()
     
     kwargs = {"region_name": settings.AWS_REGION}
@@ -179,7 +158,8 @@ app.include_router(crud_router(
     update_schema = CourierGeneralSchema,
     select_schema = CourierGeneralSchema,
     path = "/couriers",
-    tags = ["Couriers"]
+    tags = ["Couriers"],
+    included_methods = ["read", "read_multi", "update"]
 ))
 
 # Rotas adicionais: histórico de pedidos + menu de restaurantes

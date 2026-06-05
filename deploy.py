@@ -123,7 +123,7 @@ def check_docker_ready() -> None:
 
 
 def stage_terraform_init() -> None:
-    print("\n═════════ Iniciando terraform ═════════")
+    print("\n======== Iniciando terraform ========")
     execute_terraform_command(["init", "-input=false"])
 
 
@@ -134,7 +134,7 @@ def stage_terraform_plan(db_user: str, db_pass: str | None, arn_role) -> None:
 
 
 def stage_terraform_apply(db_user: str, db_pass: str | None, arn_role) -> None:
-    print("\n═════════ Aplicando infraestrutura definida no Terraform ═════════")
+    print("\n======== Aplicando infraestrutura definida no Terraform ========")
     args = [
         "apply",
         "-auto-approve",
@@ -146,7 +146,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None, arn_role) -> None:
 
 
 def stage_terraform_destroy(db_user: str, db_pass: str | None, arn_role) -> None:
-    print("\n═════════ Destruindo a infraestrutura com Terraform ═════════")
+    print("\n======== Destruindo a infraestrutura com Terraform ========")
     args = [
         "destroy",
         "-auto-approve",
@@ -159,7 +159,7 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None, arn_role) -> None
 
 
 def stage_build_push(outputs: dict[str, Any]) -> None:
-    print("\n═════════ Fazendo deploy das imagens docker (ECR) ═════════")
+    print("\n======== Fazendo deploy das imagens docker (ECR) ========")
     
     #Pega a região e a url de algum dos repositórios pra poder fazer login com o cli
     region = outputs["aws_region"]["value"]
@@ -220,7 +220,7 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     
 
 def stage_smoke_test(outputs: dict[str, Any]) -> None:
-    print("\n═════════ Testando os serviços com deploy (via ALB) ═════════")
+    print("\n======== Testando os serviços com deploy (via ALB) ========")
     
     alb_dns = outputs["alb_dns_name"]["value"] #pega o link em que o alb colocou os recursos
     base = f"http://{alb_dns}"
@@ -256,6 +256,80 @@ def stage_smoke_from_state() -> None:
     stage_smoke_test(out)
 
 
+def stage_rds_init_via_ssm(outputs: dict[str, Any], db_user: str, db_password: str | None) -> None:
+    print("\n======== Inicializando banco de dados RDS (via SSM no EC2) ========")
+    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
+    if not instance_id:
+        raise RuntimeError("ID da instância EC2 para inicialização do banco não encontrado nos outputs.")
+    
+    rds_endpoint = outputs["rds_endpoint"]["value"]
+    
+    init_db_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "init_db.py")
+    schema_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "schema.sql")
+    lookup_path = os.path.join(PROJECT_ROOT, "infra", "database", "rds", "lookup-data.sql")
+    
+    with open(init_db_path, "r", encoding="utf-8") as f:
+        init_db_content = f.read()
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema_content = f.read()
+    with open(lookup_path, "r", encoding="utf-8") as f:
+        lookup_content = f.read()
+        
+    commands = [
+        "#!/bin/bash",
+        "set -e",
+        "cd /home/ec2-user",
+        "sudo dnf install -y python3-pip",
+        "mkdir -p db_init",
+        "cd db_init",
+        "cat << \"EOF_INIT\" > init_db.py",
+        init_db_content,
+        "EOF_INIT",
+        "cat << \"EOF_SCHEMA\" > schema.sql",
+        schema_content,
+        "EOF_SCHEMA",
+        "cat << \"EOF_LOOKUP\" > lookup-data.sql",
+        lookup_content,
+        "EOF_LOOKUP",
+        "pip3 install psycopg2-binary",
+        f"python3 init_db.py --host {rds_endpoint} --user {db_user} --dbname dijkfood " + (f"--password {db_password}" if db_password else "")
+    ]
+    
+    aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    ssm_client = boto3.client("ssm", region_name=aws_region)
+    
+    try:
+        response = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands}
+        )
+        cmd_id = response["Command"]["CommandId"]
+        print(f"Comando SSM de inicialização do banco enviado (ID: {cmd_id}). Aguardando conclusão...")
+        
+        while True:
+            time.sleep(5)
+            print(".", end="", flush=True)
+            try:
+                inv = ssm_client.get_command_invocation(
+                    CommandId=cmd_id,
+                    InstanceId=instance_id
+                )
+                status = inv["Status"]
+                if status not in ("Pending", "InProgress", "Delayed"):
+                    print(f"\nSSM concluído com status: {status}")
+                    if status != "Success":
+                        print(f"Stdout:\n{inv.get('StandardOutputContent')}")
+                        print(f"Stderr:\n{inv.get('StandardErrorContent')}")
+                        raise RuntimeError(f"Inicialização do banco via SSM falhou com status {status}")
+                    break
+            except ssm_client.exceptions.InvocationDoesNotExist:
+                continue
+    except Exception as exc:
+        print(f"\n[Erro] Falha ao executar inicialização no EC2 via SSM: {exc}")
+        raise
+
+
 #Função principal para executar todo o workflow
 def run_full_deploy(db_user: str, db_password: str | None, arn_role) -> dict[str, Any]:
     #Executa terraform init
@@ -266,6 +340,9 @@ def run_full_deploy(db_user: str, db_password: str | None, arn_role) -> dict[str
 
     #Pega os outputs do comando do terraform, pra usar eles
     outputs = tf_output()
+
+    # Inicializa o banco de dados RDS (Executa schema e seeds uma única vez de dentro da VPC)
+    stage_rds_init_via_ssm(outputs, db_user, db_password)
 
     #Roda os comandos docker (docker login, docker build e docker push pra cada imagem)
     stage_build_push(outputs)
@@ -279,7 +356,7 @@ def run_full_deploy(db_user: str, db_password: str | None, arn_role) -> dict[str
     return outputs
 
 def stage_run_load_test(outputs: dict[str, Any]) -> None:
-    print("\n═════════ Rodando simulacao de carga com o EC2 ═════════")
+    print("\n======== Rodando simulacao de carga com o EC2 ========")
     
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
@@ -325,10 +402,10 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "EOF_SIM",
         "pip3 install -r requirements.txt",
         "set -a; source /etc/environment; set +a",
-        "echo \"═════════ Iniciando Populate ═════════\"",
-        f"SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u main.py",
-        "echo \"═════════ Iniciando Simulacao ═════════\"",
-        f"SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u simulator.py"
+        "echo \"========= Iniciando Populate ========\"",
+        f"PYTHONIOENCODING=utf-8 SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u main.py",
+        "echo \"========= Iniciando Simulacao ========\"",
+        f"PYTHONIOENCODING=utf-8 SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u simulator.py"
     ]
 
     log_group_name = "/aws/ssm/dijkfood-full-simulation"
