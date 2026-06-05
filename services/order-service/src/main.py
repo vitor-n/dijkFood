@@ -109,21 +109,40 @@ async def create_order(
     if not items:
         raise HTTPException(status_code=404, detail="Nenhum entregador disponível")
 
-    # 3. Marca o primeiro entregador como BUSY
-    courier = items[0]
-    try:
-        busy_response = await client.patch(
-            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-            json={"ID_courier": courier["ID_courier"], "status": "BUSY"},
-        )
-    except httpx.RequestError:
-        logger.exception("Tracking service request failed while setting courier BUSY")
-        raise
-    try:
-        busy_response.raise_for_status()
-    except httpx.HTTPStatusError:
-        logger.exception("Tracking service error while setting courier BUSY: %s", busy_response.text)
-        raise
+    # 3. Tenta marcar um entregador como BUSY, se der 409 (double booking), tenta o próximo
+    assigned_courier = None
+    for courier in items:
+        try:
+            busy_response = await client.patch(
+                urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
+                json={"ID_courier": courier["ID_courier"], "status": "BUSY"},
+            )
+            
+            # Se for sucesso (200), esse é o entregador alocado
+            if busy_response.status_code == 200:
+                assigned_courier = courier
+                break
+                
+            # Se for 409, outro pedido já o alocou, tenta o próximo
+            elif busy_response.status_code == 409:
+                logger.info(f"Courier {courier['ID_courier']} already busy. Retrying with next closest.")
+                continue
+                
+            else:
+                busy_response.raise_for_status()
+                
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                logger.info(f"Courier {courier['ID_courier']} already busy. Retrying with next closest.")
+                continue
+            logger.exception("Tracking service error while setting courier BUSY: %s", exc.response.text)
+            raise
+        except httpx.RequestError:
+            logger.exception("Tracking service request failed while setting courier BUSY")
+            raise
+
+    if not assigned_courier:
+        raise HTTPException(status_code=409, detail="Nenhum entregador disponível no momento (conflito de alocação)")
 
     # 4. Persiste pedido - se falhar, tenta compensar o DynamoDB
     try:
@@ -131,7 +150,7 @@ async def create_order(
             created_at=datetime.now(),
             ID_restaurant=req.id_restaurant,
             ID_user=req.id_user,
-            ID_courier=courier["ID_courier"],
+            ID_courier=assigned_courier["ID_courier"],
             ID_last_state=1,
         )
         db.add(new_order)
@@ -150,13 +169,13 @@ async def create_order(
         try:
             await client.patch(
                 urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-                json={"ID_courier": courier["ID_courier"], "status": "AVAILABLE"},
+                json={"ID_courier": assigned_courier["ID_courier"], "status": "AVAILABLE"},
             )
         except Exception:
             logger.exception("Failed to release courier after order create error")
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"id_order": new_order.ID_order, "id_courier": courier["ID_courier"]}
+    return {"id_order": new_order.ID_order, "id_courier": assigned_courier["ID_courier"]}
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +202,7 @@ async def update_order(
             raise HTTPException(status_code=404, detail="Order not found or invalid status transition")
 
         row_dict = row._mapping
+        await db.commit()
 
         if req.id_state == 6:
             try:
@@ -199,7 +219,6 @@ async def update_order(
                 logger.exception("Tracking service error while setting courier AVAILABLE: %s", response.text)
                 raise
 
-        await db.commit()
         return {"id_order": row_dict["id_order"], "id_state": row_dict["id_state"]}
 
     except HTTPException:

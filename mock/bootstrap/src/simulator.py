@@ -149,7 +149,7 @@ class Metrics:
                 p95 = latencies[0]     
             # Alerta visual se passar de 500ms
             p95_str = f"{p95:7.1f}ms"
-            if p95 > 500: p95_str += " ⚠️"
+            if p95 > 500: p95_str += " [!]"
             
             print(f"{key:<35s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str}")
         print("=" * 80)
@@ -376,7 +376,7 @@ async def main():
     if config.silent:
         logging.getLogger("httpx").setLevel(logging.ERROR)
 
-    print("Iniciando cénario:", config.scenario, "às", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
     limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 

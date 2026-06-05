@@ -1,3 +1,4 @@
+import asyncio
 import time
 from decimal import Decimal
 from typing import List, Dict, Any
@@ -23,6 +24,17 @@ class CourierRepository:
         self.table = table
 
     async def update_status(self, ID_courier: int, status: CourierStatus):
+        cond = "attribute_exists(ID_courier)"
+        expr_vals = {
+            ":new_status": status.value if hasattr(status, "value") else status,
+            ":now": int(time.time() * 1000)
+        }
+        
+        # Se estiver mudando para BUSY, exige que o entregador esteja AVAILABLE atualmente
+        if status == CourierStatus.BUSY or status == "BUSY":
+            cond += " AND #s = :expected_old_status"
+            expr_vals[":expected_old_status"] = CourierStatus.AVAILABLE.value
+
         await self.table.update_item(
             Key={
                 "ID_courier": ID_courier,
@@ -31,25 +43,23 @@ class CourierRepository:
             ExpressionAttributeNames={
                 "#s": "status"
             },
-            ExpressionAttributeValues={
-                ":new_status": status,
-                ":now": int(time.time() * 1000)
-            },
-            ConditionExpression="attribute_exists(ID_courier)"
+            ExpressionAttributeValues=expr_vals,
+            ConditionExpression=cond
         )
 
     async def update_location(self, data: CourierPositionUpdate):
         cell_index = generate_cell_index(data.lat, data.lon)
 
+        # Atualiza a localização no DynamoDB.
+        # IMPORTANTE: Não atualizamos o status aqui para evitar que atualizações de posição
+        # enviadas por entregadores em trânsito (BUSY) sobrescrevam seu status para AVAILABLE.
         await self.table.update_item(
             Key={"ID_courier": data.ID_courier},
-            UpdateExpression="SET cell_index = :c, lat = :la, lon = :lo, #s = :st, updated_at = :u",
-            ExpressionAttributeNames={"#s": "status"},
+            UpdateExpression="SET cell_index = :c, lat = :la, lon = :lo, updated_at = :u",
             ExpressionAttributeValues={
                 ":c": cell_index,
                 ":la": Decimal(str(data.lat)),
                 ":lo": Decimal(str(data.lon)),
-                ":st": data.status.value,
                 ":u": int(time.time() * 1000),
             },
             ConditionExpression="attribute_exists(ID_courier)",
@@ -57,19 +67,37 @@ class CourierRepository:
 
     async def get_nearby(self, lat: float, lon: float) -> dict[str, Any]:
         center_cell = generate_cell_index(lat, lon)
-        cells_to_search = h3.grid_disk(center_cell, 1)
+        cells_to_search = list(h3.grid_disk(center_cell, 1))
 
-        couriers = []
+        # Dispara queries no DynamoDB em paralelo para todas as 7 células
+        tasks = []
+        for cell in cells_to_search:
+            tasks.append(
+                self.table.query(
+                    IndexName="CellIndex",
+                    KeyConditionExpression="cell_index = :ci",
+                    FilterExpression="#s = :avail",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":ci": cell,
+                        ":avail": CourierStatus.AVAILABLE.value
+                    }
+                )
+            )
 
-        response = await self.table.query(
-            IndexName="CellIndex",
-            KeyConditionExpression="cell_index = :ci",
-            FilterExpression="#s = :avail",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":ci": center_cell,
-                ":avail": CourierStatus.AVAILABLE
-            }
-        )
+        responses = await asyncio.gather(*tasks)
+        
+        merged_items = []
+        for resp in responses:
+            for item in resp.get("Items", []):
+                merged_items.append(_jsonify_item(item))
 
-        return response
+        # Ordenar os entregadores pela distância euclidiana para priorizar os mais próximos
+        def get_dist(c):
+            dlat = c["lat"] - lat
+            dlon = c["lon"] - lon
+            return dlat * dlat + dlon * dlon
+
+        merged_items.sort(key=get_dist)
+
+        return {"Items": merged_items, "Count": len(merged_items)}
