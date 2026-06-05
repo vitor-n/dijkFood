@@ -104,8 +104,7 @@ por decisão de robustez (documentado, não “Serverless Inference”).
 
 ## 4. Capacidade conversacional
 
-`assistant-service` (ECS/Fargate): **text-to-SQL via Bedrock** (Claude
-Haiku/Nova Lite) sobre um **catálogo semântico** (schema das views + dicionário +
+`assistant-service` (ECS/Fargate): **text-to-SQL via Bedrock**  sobre um **catálogo semântico** (schema das views + dicionário +
 few-shots, sobrescrevível em `s3://…/semantic/`), com **guard** (SELECT-only,
 allowlist de views curadas, LIMIT) e **fallback determinístico** (intents → SQL)
 que mantém a capacidade sem acesso ao Bedrock. Execução no Athena + resumo em

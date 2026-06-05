@@ -265,7 +265,7 @@ variable "bedrock_region" {
 variable "bedrock_model_id" {
   description = "Model ID do Bedrock para o text-to-SQL"
   type        = string
-  default     = "anthropic.claude-3-haiku-20240307-v1:0"
+  default     = "amazon.nova-micro-v1:0"
 }
 
 # ---------- Pipeline de ML ----------

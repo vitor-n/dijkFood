@@ -1,5 +1,5 @@
 """
-Text-to-SQL via Amazon Bedrock (Claude Haiku / Nova Lite).
+Text-to-SQL via Amazon Bedrock
 
 Monta o prompt com o schema das views, o dicionário de negócio e exemplos
 few-shot, e pede ao modelo APENAS o SQL. Se o Bedrock não estiver disponível
