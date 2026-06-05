@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DijkFood · Assistente</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{ --bg:#0b0f1a; --panel:rgba(23,31,48,.72); --border:rgba(125,145,190,.14);
+    --text:#e8edf7; --dim:#93a0bd; --faint:#5e6b87; --accent:#34e3b0; --accent2:#7c8cff; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--text);min-height:100vh;
+    background:radial-gradient(1000px 560px at 15% -10%, rgba(124,140,255,.12), transparent 60%),
+               radial-gradient(900px 560px at 95% 0%, rgba(52,227,176,.10), transparent 55%), var(--bg);
+    display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+  header{position:sticky;top:0;z-index:5;backdrop-filter:blur(12px);
+    background:linear-gradient(180deg,rgba(11,15,26,.92),rgba(11,15,26,.5));
+    border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;gap:14px}
+  .logo{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#08111a;
+    background:linear-gradient(135deg,var(--accent2),var(--accent));box-shadow:0 8px 22px -8px rgba(124,140,255,.6)}
+  header h1{font-size:16px;font-weight:700}
+  header p{font-size:12px;color:var(--dim);margin-top:2px}
+  .badge{margin-left:auto;font-size:11px;color:var(--dim);background:rgba(52,227,176,.08);
+    border:1px solid rgba(52,227,176,.22);padding:6px 12px;border-radius:999px}
+  main{flex:1;width:100%;max-width:920px;margin:0 auto;padding:22px;display:flex;flex-direction:column}
+  #log{flex:1;display:flex;flex-direction:column;gap:16px;padding-bottom:18px}
+  .msg{display:flex;gap:12px;max-width:100%}
+  .msg .av{width:30px;height:30px;border-radius:9px;flex:0 0 30px;display:grid;place-items:center;font-size:14px}
+  .msg.user{flex-direction:row-reverse}
+  .msg.user .av{background:rgba(124,140,255,.18)}
+  .msg.bot .av{background:rgba(52,227,176,.16)}
+  .bubble{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:13px 15px;font-size:14px;line-height:1.55}
+  .msg.user .bubble{background:rgba(124,140,255,.14);border-color:rgba(124,140,255,.3)}
+  .bubble b{color:#fff}
+  .src{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint);margin-bottom:6px;display:flex;gap:8px;align-items:center}
+  .tag{padding:2px 8px;border-radius:6px;background:rgba(52,227,176,.12);color:var(--accent)}
+  .tag.fb{background:rgba(255,209,102,.12);color:#ffd166}
+  details{margin-top:10px;border-top:1px solid var(--border);padding-top:9px}
+  summary{cursor:pointer;font-size:12px;color:var(--dim);user-select:none}
+  pre{margin-top:8px;background:#0c1322;border:1px solid var(--border);border-radius:9px;padding:11px;
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:#aeb9d6;overflow-x:auto;white-space:pre-wrap}
+  table{margin-top:10px;border-collapse:collapse;font-size:12.5px;width:100%;overflow:hidden;border-radius:8px}
+  th,td{padding:7px 11px;text-align:left;border-bottom:1px solid var(--border)}
+  th{background:rgba(124,140,255,.08);color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  td{font-family:'JetBrains Mono',monospace;color:var(--text)}
+  .chart{margin-top:12px;height:260px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 16px}
+  .chip{font-size:12.5px;color:var(--dim);background:var(--panel);border:1px solid var(--border);
+    padding:8px 13px;border-radius:999px;cursor:pointer;transition:.16s}
+  .chip:hover{border-color:var(--accent2);color:var(--text);transform:translateY(-1px)}
+  form{position:sticky;bottom:0;display:flex;gap:10px;padding:14px 0 6px;
+    background:linear-gradient(0deg,var(--bg) 70%,transparent)}
+  input{flex:1;font-family:inherit;font-size:14px;color:var(--text);background:var(--panel);
+    border:1px solid var(--border);border-radius:13px;padding:14px 16px;outline:none}
+  input:focus{border-color:var(--accent2)}
+  button{font-family:inherit;font-weight:600;font-size:14px;color:#08111a;border:none;border-radius:13px;
+    padding:0 22px;cursor:pointer;background:linear-gradient(135deg,var(--accent2),var(--accent))}
+  button:disabled{opacity:.5;cursor:default}
+  .typing span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--dim);margin:0 2px;animation:b 1.2s infinite}
+  .typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+  @keyframes b{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">D</div>
+    <div><h1>DijkFood · Assistente Conversacional</h1><p>Perguntas em linguagem natural sobre a operação — text-to-SQL → Athena</p></div>
+    <span class="badge" id="badge">…</span>
+  </header>
+
+  <main>
+    <div id="log"></div>
+    <div class="chips" id="chips"></div>
+    <form id="form" autocomplete="off">
+      <input id="q" placeholder="Pergunte algo… ex.: qual o tempo médio de entrega?" autofocus />
+      <button id="send" type="submit">Enviar</button>
+    </form>
+  </main>
+
+<script>
+const log = document.getElementById("log");
+const chipsEl = document.getElementById("chips");
+const DEFAULT_CHIPS = [
+  "Quantos pedidos na última hora?",
+  "Qual o tempo médio de entrega?",
+  "Top 5 restaurantes por volume",
+  "Pedidos em andamento por estado",
+  "Quantos entregadores disponíveis?",
+  "Distribuição de pedidos por região",
+];
+
+function esc(s){ return String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function mdBold(s){ return esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
+
+function addUser(text){
+  log.insertAdjacentHTML("beforeend",
+    `<div class="msg user"><div class="av">🧑</div><div class="bubble">${esc(text)}</div></div>`);
+  scroll();
+}
+function addTyping(){
+  const id = "t"+Date.now();
+  log.insertAdjacentHTML("beforeend",
+    `<div class="msg bot" id="${id}"><div class="av">🤖</div><div class="bubble typing"><span></span><span></span><span></span></div></div>`);
+  scroll(); return id;
+}
+function tableHtml(cols, rows){
+  if(!rows.length) return "";
+  const head = "<tr>"+cols.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";
+  const body = rows.slice(0,12).map(r=>"<tr>"+cols.map(c=>`<td>${esc(r[c])}</td>`).join("")+"</tr>").join("");
+  const more = rows.length>12 ? `<tr><td colspan="${cols.length}" style="color:var(--faint)">… +${rows.length-12} linhas</td></tr>` : "";
+  return `<table>${head}${body}${more}</table>`;
+}
+function addBot(d){
+  const tag = d.source==="bedrock" ? `<span class="tag">Bedrock</span>` : `<span class="tag fb">Determinístico</span>`;
+  const meta = d.intent ? ` · ${esc(d.intent)}` : "";
+  const table = (d.rows && d.rows.length) ? tableHtml(d.columns||[], d.rows) : "";
+  const sql = d.sql ? `<details><summary>Ver SQL gerado</summary><pre>${esc(d.sql)}</pre></details>` : "";
+  const chartId = d.chart ? "ch"+Date.now() : null;
+  const chart = chartId ? `<div class="chart" id="${chartId}"></div>` : "";
+  log.insertAdjacentHTML("beforeend",
+    `<div class="msg bot"><div class="av">🤖</div><div class="bubble">
+       <div class="src">${tag}${meta}</div>
+       <div>${mdBold(d.answer)}</div>${chart}${table}${sql}
+     </div></div>`);
+  if(chartId && d.chart) drawChart(chartId, d.chart);
+  scroll();
+}
+function drawChart(id, c){
+  const layout={paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",
+    font:{family:"Inter",color:"#93a0bd",size:11},margin:{l:48,r:14,t:8,b:46},
+    xaxis:{title:{text:c.x_label,font:{size:11}},gridcolor:"rgba(125,145,190,.1)",type:c.type==="bar"?"category":"-",tickangle:-25,tickfont:{size:10}},
+    yaxis:{title:{text:c.y_label,font:{size:11}},gridcolor:"rgba(125,145,190,.1)"}};
+  const tr = c.type==="line"
+    ? [{x:c.x,y:c.y,type:"scatter",mode:"lines",fill:"tozeroy",line:{color:"#34e3b0",width:2.2,shape:"spline"},fillcolor:"rgba(52,227,176,.12)"}]
+    : [{x:c.x,y:c.y,type:"bar",marker:{color:"#7c8cff"}}];
+  Plotly.newPlot(id, tr, layout, {displayModeBar:false,responsive:true});
+}
+function scroll(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }
+
+async function ask(text){
+  addUser(text);
+  const tid = addTyping();
+  document.getElementById("send").disabled = true;
+  try{
+    const res = await fetch("/chat/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:text})});
+    const d = await res.json();
+    document.getElementById(tid).remove();
+    addBot(d);
+  }catch(e){
+    document.getElementById(tid).remove();
+    addBot({answer:"Erro ao consultar o assistente: "+e.message, source:"fallback"});
+  }finally{
+    document.getElementById("send").disabled = false;
+  }
+}
+
+document.getElementById("form").addEventListener("submit", e=>{
+  e.preventDefault();
+  const q = document.getElementById("q");
+  const t = q.value.trim(); if(!t) return; q.value=""; ask(t);
+});
+
+function renderChips(items){
+  chipsEl.innerHTML = items.map(c=>`<span class="chip">${esc(c)}</span>`).join("");
+  chipsEl.querySelectorAll(".chip").forEach(el=>el.addEventListener("click",()=>ask(el.textContent)));
+}
+
+(async function init(){
+  renderChips(DEFAULT_CHIPS);
+  try{
+    const c = await (await fetch("/chat/capabilities")).json();
+    document.getElementById("badge").textContent = c.bedrock_enabled ? ("Bedrock · "+(c.model||"")) : "Modo determinístico";
+    if(c.examples && c.examples.length) renderChips(c.examples);
+  }catch(e){ document.getElementById("badge").textContent = "pronto"; }
+  log.insertAdjacentHTML("beforeend",
+    `<div class="msg bot"><div class="av">🤖</div><div class="bubble">
+       Olá! Sou o assistente operacional do DijkFood. Pergunte sobre pedidos, entregas,
+       restaurantes, regiões ou entregadores — eu consulto a camada analítica em tempo quase real.
+     </div></div>`);
+})();
+</script>
+</body>
+</html>

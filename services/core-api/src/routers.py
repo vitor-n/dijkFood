@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from .models import async_session, Restaurant
-from .new_models import Order, OrderEvent, Item
+from .new_models import Order, OrderEvent, Item, OutboxEvent
 from .schemas import (
     OrderSummarySchema,
     OrderHistorySchema,
@@ -19,7 +19,6 @@ from .schemas import (
     ItemCreateSchema,
     ItemResponseSchema,
 )
-from .firehose import send_to_firehose
 
 router = APIRouter()
 
@@ -149,21 +148,18 @@ async def add_menu_item(
 
     item = Item(name=payload.name, id_restaurant=restaurant_id)
     session.add(item)
-    await session.commit()
-    await session.refresh(item)
+    await session.flush()
 
+    # Outbox transacional.
     item_data = {
         "id_item": item.id_item,
         "name": item.name,
-        "id_restaurant": item.id_restaurant
+        "id_restaurant": item.id_restaurant,
     }
-    background_tasks.add_task(
-        send_to_firehose, 
-        request, 
-        "MenuItem", 
-        "CREATE", 
-        item_data
-    )
+    session.add(OutboxEvent(entidade="MenuItem", acao="CREATE", dados=item_data))
+
+    await session.commit()
+    await session.refresh(item)
 
     return ItemResponseSchema(
         id_item=item.id_item,

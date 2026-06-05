@@ -16,7 +16,7 @@ from .models import (User, UserSchema,
                    Courier, CourierGeneralSchema, CourierCreationSchema,
                    async_session)
 from .routers import router as extra_router
-from .firehose import send_to_firehose
+from .new_models import OutboxEvent
 
 from .config import settings
 
@@ -89,21 +89,14 @@ async def create_user_custom(
 ):
     new_user = User(**user.model_dump())
     session.add(new_user)
+    await session.flush()
+
+    # Outbox transacional: evento analítico gravado na MESMA transação.
+    user_data = {**user.model_dump(), "id_user": new_user.id_user}
+    session.add(OutboxEvent(entidade="User", acao="CREATE", dados=user_data))
+
     await session.commit()
     await session.refresh(new_user)
-
-    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
-    user_data = new_user.__dict__.copy()
-    user_data.pop("_sa_instance_state", None)
-
-    # Dispara para o Firehose em segundo plano
-    background_tasks.add_task(
-        send_to_firehose,
-        request,
-        "User",
-        "CREATE",
-        user_data
-    )
     return new_user
 
 
@@ -116,21 +109,14 @@ async def create_restaurant_custom(
 ):
     new_restaurant = Restaurant(**restaurant.model_dump())
     session.add(new_restaurant)
+    await session.flush()
+
+    # Outbox transacional.
+    restaurant_data = {**restaurant.model_dump(), "id_restaurant": new_restaurant.id_restaurant}
+    session.add(OutboxEvent(entidade="Restaurant", acao="CREATE", dados=restaurant_data))
+
     await session.commit()
     await session.refresh(new_restaurant)
-
-    # Prepara os dados para o Data Lake, removendo metadados do SQLAlchemy
-    restaurant_data = new_restaurant.__dict__.copy()
-    restaurant_data.pop("_sa_instance_state", None)
-
-    # Dispara para o Firehose em segundo plano
-    background_tasks.add_task(
-        send_to_firehose,
-        request,
-        "Restaurant",
-        "CREATE",
-        restaurant_data
-    )
     return new_restaurant
 
 #Mágica do fastcrud para gerar os endpoints básicos
@@ -197,19 +183,12 @@ async def create_courier_custom(
         )
     duration = time.perf_counter_ns() - start
     print(f"Escrever no Dynamo levou {duration // 1000000}ms.")
+
+    # Outbox transacional (mesma transação do cadastro do entregador).
+    courier_data = {**courier.model_dump(exclude={"lat", "lon"}), "id_courier": courier_trimmed.id_courier}
+    session.add(OutboxEvent(entidade="Courier", acao="CREATE", dados=courier_data))
+
     await session.commit()
-
-    courier_data = courier_trimmed.__dict__.copy()
-    courier_data.pop("_sa_instance_state", None)
-    
-    background_tasks.add_task(
-        send_to_firehose, 
-        request, 
-        "Courier", 
-        "CREATE", 
-        courier_data
-    )
-
     return courier_trimmed
 
 @app.delete("/couriers/{id_courier}", tags=["Couriers"])

@@ -107,3 +107,25 @@ CREATE TABLE OrderItems
   FOREIGN KEY (ID_item) REFERENCES Items(ID_item),
   FOREIGN KEY (ID_order) REFERENCES Orders(ID_order)
 );
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Transactional Outbox — durabilidade forte dos eventos analíticos.
+--  A operação grava o evento na MESMA transação do dado de domínio; um
+--  publisher (Lambda outbox-publisher) lê as linhas não publicadas e envia ao
+--  Firehose com retry. Garante que nenhum evento se perca se o Firehose falhar.
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS outbox_events
+(
+  id           BIGSERIAL PRIMARY KEY,
+  entidade     VARCHAR(64)  NOT NULL,
+  acao         VARCHAR(32)  NOT NULL,
+  dados        JSONB        NOT NULL,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ  NULL,
+  attempts     INT          NOT NULL DEFAULT 0,
+  last_error   TEXT         NULL
+);
+
+-- Índice parcial: o publisher varre apenas os pendentes (varredura barata).
+CREATE INDEX IF NOT EXISTS idx_outbox_unpublished
+  ON outbox_events (id) WHERE published_at IS NULL;

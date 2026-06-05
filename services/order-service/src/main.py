@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request
 import httpx
+import asyncio
 from contextlib import asynccontextmanager
 import aioboto3
 import json
@@ -11,18 +12,26 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from datetime import datetime
 from urllib.parse import urljoin
 
-from .models import (Order, OrderEvent, Restaurant,
+from .models import (Order, OrderEvent, Restaurant, OutboxEvent,
                      OrderCreationRequest, OrderCreationResponse,
                      OrderUpdateRequest, OrderUpdateResponse)
 from .config import settings
-from .firehose import send_to_firehose
+from .prediction import predict_eta
+
+
+async def _resolve_eta(task: "asyncio.Task | None") -> dict:
+    """Resolve a predição de ETA disparada concorrentemente. Nunca levanta."""
+    if task is None:
+        return {"eta_minutes": settings.ETA_FALLBACK_MIN, "source": "fallback"}
+    try:
+        return await task
+    except Exception:
+        return {"eta_minutes": settings.ETA_FALLBACK_MIN, "source": "fallback"}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    session = aioboto3.Session()
-    async with session.client("firehose", region_name=settings.AWS_REGION) as firehose_client:
-        app.state.firehose_client = firehose_client
-        yield
+    yield
 
 app = FastAPI(title="DijkFood Order Service", lifespan = lifespan)
 
@@ -53,48 +62,44 @@ async def get_db():
 
 @app.post("/order", response_model = OrderCreationResponse)
 async def create_order(
-    req: OrderCreationRequest, 
-    request: Request, 
+    req: OrderCreationRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
+    # A predição de ETA roda CONCORRENTEMENTE com a atribuição de entregador e a
+    # escrita no banco — sobrepondo-se ao I/O já existente, sem adicionar latência
+    # serial ao caminho crítico (e com timeout curto + fallback internos).
+    eta_task = asyncio.create_task(predict_eta(http_client, req.id_restaurant))
 
-    stmt = select(Restaurant).where(Restaurant.ID_restaurant == req.id_restaurant)
-    restaurant_result = await db.execute(stmt)
-    restaurant = restaurant_result.scalar_one_or_none()
-    if restaurant is None:
-        raise HTTPException(status_code = 404, detail = "Restaurant does not exist")
-    
-    print("restaurante existe:", restaurant.lat, restaurant.lon)
+    try:
+        stmt = select(Restaurant).where(Restaurant.ID_restaurant == req.id_restaurant)
+        restaurant_result = await db.execute(stmt)
+        restaurant = restaurant_result.scalar_one_or_none()
+        if restaurant is None:
+            raise HTTPException(status_code = 404, detail = "Restaurant does not exist")
 
-
-    response = await http_client.get(
-        urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
-        params = {"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
-        timeout = 2.0
-    )
-
-    if response.status_code == 422:
-        print("Detalhes da rejeição do FastAPI:", response.text)
-
-    response.raise_for_status()
-    couriers = response.json()
-
-    if len(couriers["Items"]) == 0:
-        raise HTTPException(status_code = 404, detail = "Não temos entregadores disponíveis")
-    
-    #TODO: Implement proper loop
-    for courier in couriers["Items"]:
-        response = await http_client.patch(
-            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
-            json = {"ID_courier": courier["ID_courier"], "status": "BUSY"},
+        response = await http_client.get(
+            urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
+            params = {"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
             timeout = 2.0
         )
         response.raise_for_status()
-        print(response.json())
-        break
+        couriers = response.json()
 
-    try:
+        if len(couriers["Items"]) == 0:
+            raise HTTPException(status_code = 404, detail = "Não temos entregadores disponíveis")
+
+        #TODO: Implement proper loop
+        for courier in couriers["Items"]:
+            response = await http_client.patch(
+                urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/status"),
+                json = {"ID_courier": courier["ID_courier"], "status": "BUSY"},
+                timeout = 2.0
+            )
+            response.raise_for_status()
+            break
+
         new_order = Order(
             created_at = datetime.now(),
             ID_restaurant = req.id_restaurant,
@@ -102,33 +107,49 @@ async def create_order(
             ID_courier = courier["ID_courier"],
             ID_last_state = 1
         )
-        
+
         db.add(new_order)
-        await db.flush() 
-        
+        await db.flush()
+
         new_event = OrderEvent(
             changed_at = new_order.created_at,
             ID_order = new_order.ID_order,
             ID_state = new_order.ID_last_state
         )
-        
         db.add(new_event)
-        await db.commit()
-        
+
+        # ETA já estava sendo computada em paralelo.
+        eta = await _resolve_eta(eta_task)
+
         order_data = {
             "id_order": new_order.ID_order,
-            "created_at": new_order.created_at,
+            "created_at": new_order.created_at.isoformat(),
             "id_restaurant": new_order.ID_restaurant,
             "id_user": new_order.ID_user,
             "id_courier": new_order.ID_courier,
-            "id_last_state": new_order.ID_last_state
+            "id_last_state": new_order.ID_last_state,
+            "predicted_eta_minutes": eta["eta_minutes"],
+            "eta_source": eta["source"],
         }
-        background_tasks.add_task(send_to_firehose, request, "Order", "CREATE", order_data)
+        # Outbox transacional: o evento analítico é gravado na MESMA transação do
+        # pedido. Um publisher (Lambda) o entrega ao Firehose com retry — nenhum
+        # evento se perde se o Firehose estiver indisponível.
+        db.add(OutboxEvent(entidade="Order", acao="CREATE", dados=order_data))
+        await db.commit()
 
-        return {"id_order": new_order.ID_order, "id_courier": courier["ID_courier"]}
-        
+        return {
+            "id_order": new_order.ID_order,
+            "id_courier": courier["ID_courier"],
+            "eta_minutes": eta["eta_minutes"],
+            "eta_source": eta["source"],
+        }
+
+    except HTTPException:
+        eta_task.cancel()
+        await db.rollback()
+        raise
     except Exception as e:
-
+        eta_task.cancel()
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -169,14 +190,14 @@ async def update_order(
             )
             response.raise_for_status()
 
-        await db.commit()
         row_dict = updated_row._mapping
-        
         update_data = {
             "id_order": row_dict["id_order"],
-            "id_state": row_dict["id_state"]
+            "id_state": row_dict["id_state"],
         }
-        background_tasks.add_task(send_to_firehose, request, "Order", "UPDATE", update_data)
+        # Outbox transacional (mesma transação da transição de estado).
+        db.add(OutboxEvent(entidade="Order", acao="UPDATE", dados=update_data))
+        await db.commit()
 
         return {"id_order": row_dict["id_order"], "id_state": row_dict["id_state"]}
         

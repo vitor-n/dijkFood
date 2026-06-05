@@ -11,6 +11,11 @@ output "arn_suffix" {
   value = aws_lb.main.arn_suffix
 }
 
+output "http_listener_arn" {
+  description = "ARN do listener HTTP (para regras de roteamento adicionais)"
+  value       = aws_lb_listener.http.arn
+}
+
 output "core_api_target_group_arn" {
   value = aws_lb_target_group.core_api.arn
 }

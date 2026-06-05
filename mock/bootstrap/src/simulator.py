@@ -78,14 +78,37 @@ class SimConfig:
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
     silent: bool = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
 
+    # ── Cenários operacionais parametrizáveis (A2) ──
+    # Concentração de demanda numa região (célula H3 do restaurante).
+    hotspot_region: str = os.getenv("HOTSPOT_REGION", "")
+    hotspot_weight: float = float(os.getenv("HOTSPOT_WEIGHT", 0.0))  # fração de pedidos direcionados à região
+    # Concentração de pedidos em poucos restaurantes "quentes".
+    restaurant_concentration: float = float(os.getenv("RESTAURANT_CONCENTRATION", 0.0))  # fração de pedidos
+    hot_restaurant_count: int = int(os.getenv("HOT_RESTAURANT_COUNT", 5))
+    # Redução temporária da disponibilidade de entregadores.
+    courier_outage_pct: float = float(os.getenv("COURIER_OUTAGE_PCT", 0.0))  # 0..1
+
     def __post_init__(self):
+        # Cenários de volume (A1) + presets de cenário operacional (A2).
         scenarios_mapping = {
             "testing": 5.0,
             "normal": 10.0,
             "peak": 50.0,
-            "event": 200.0
+            "event": 200.0,
+            # presets A2 — herdam volume "peak" e ligam o respectivo knob
+            "hotspot": 50.0,
+            "concentration": 50.0,
+            "outage": 50.0,
         }
         self.orders_per_second = scenarios_mapping.get(self.scenario, self.orders_per_second)
+
+        # Presets convenientes: ativam o knob se o usuário não o definiu explicitamente.
+        if self.scenario == "hotspot" and self.hotspot_weight == 0.0:
+            self.hotspot_weight = 0.7
+        if self.scenario == "concentration" and self.restaurant_concentration == 0.0:
+            self.restaurant_concentration = 0.8
+        if self.scenario == "outage" and self.courier_outage_pct == 0.0:
+            self.courier_outage_pct = 0.6
 
 # ---------------------------------------------------------------------------
 # Métricas Granulares (Para provar isolamento)
@@ -121,7 +144,25 @@ class Metrics:
         if not self.records:
             print("Nenhuma métrica de rede coletada.")
             return
-            
+
+        # ── Sumário global de SLA (evidência de não-regressão) ──
+        all_lat = [r["latency_ms"] for r in self.records]
+        total = len(self.records)
+        http_errors = sum(1 for r in self.records if r["status"] >= 400)
+        net_errors = sum(1 for r in self.records if r["status"] == 0)
+        success = sum(1 for r in self.records if r["status"] in (200, 201))
+        if len(all_lat) >= 2:
+            gq = statistics.quantiles(all_lat, n=100)
+            g_p50, g_p95, g_p99 = gq[49], gq[94], gq[98]
+        else:
+            g_p50 = g_p95 = g_p99 = all_lat[0]
+        print(f"SLA GLOBAL | reqs: {total} | sucesso: {success} "
+              f"({100*success/total:.1f}%) | erros HTTP: {http_errors} | erros rede/timeout: {net_errors} "
+              f"| taxa de erro: {100*(http_errors+net_errors)/total:.2f}%")
+        print(f"Latência global | P50: {g_p50:.1f}ms | P95: {g_p95:.1f}ms | P99: {g_p99:.1f}ms "
+              f"(requisito P95 < 500ms)")
+        print("=" * 80)
+
         by_endpoint: dict = {}
         for r in self.records:
             # Agrupa endpoints parametrizados para o log ficar limpo
@@ -135,24 +176,22 @@ class Metrics:
             key = f"{r['method']} {ep}"
             by_endpoint.setdefault(key, []).append(r["latency_ms"])
 
-        print(f"{'ENDPOINT':<35s} | {'COUNT':<6s} | {'AVG':<6s} | {'P50':<6s} | {'P95 (Req: <500ms)':<17s}")
-        print("-" * 80)
+        print(f"{'ENDPOINT':<33s} | {'COUNT':<6s} | {'AVG':<7s} | {'P50':<7s} | {'P95':<7s} | {'P99 (Req P95<500ms)':<19s}")
+        print("-" * 92)
         for key, latencies in sorted(by_endpoint.items()):
             n = len(latencies)
             avg = sum(latencies) / n
-            if(len(latencies) >= 2):
+            if len(latencies) >= 2:
                 quantiles = statistics.quantiles(latencies, n=100)
                 p50 = quantiles[49]
                 p95 = quantiles[94]
+                p99 = quantiles[98]
             else:
-                p50 = latencies[0]
-                p95 = latencies[0]     
+                p50 = p95 = p99 = latencies[0]
             # Alerta visual se passar de 500ms
-            p95_str = f"{p95:7.1f}ms"
-            if p95 > 500: p95_str += " ⚠️"
-            
-            print(f"{key:<35s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str}")
-        print("=" * 80)
+            p95_str = f"{p95:6.1f}ms" + (" ⚠️" if p95 > 500 else "")
+            print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str:<9s} | {p99:6.1f}ms")
+        print("=" * 92)
 
 metrics = Metrics()
 
@@ -312,7 +351,8 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
 async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
     users = []
     rests = []
-    
+    rests_meta = []  # [{id, h3}] — usado pelos cenários (hotspot/concentração)
+
     page = 1
     while True:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
@@ -327,19 +367,101 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
 
     page = 1
     while True:
-        r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)    
+        r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)
         if r_body:
-            rests.extend([r["id_restaurant"] for r in r_body.get("data", [])])
+            for r in r_body.get("data", []):
+                rests.append(r["id_restaurant"])
+                rests_meta.append({"id": r["id_restaurant"], "h3": r.get("h3_index")})
             if r_body['has_more']:
                 page += 1
             else:
                 break
         else:
-            break                
+            break
 
-    return users, rests
+    return users, rests, rests_meta
 
-async def order_emitter(client, users, restaurants, config):
+
+# ---------------------------------------------------------------------------
+# Cenários operacionais parametrizáveis (A2)
+# ---------------------------------------------------------------------------
+
+def build_restaurant_population(rests_meta: list, config: SimConfig):
+    """Constrói (população, pesos) para amostragem ponderada dos restaurantes
+    conforme os knobs de cenário (hotspot por região e concentração)."""
+    ids = [m["id"] for m in rests_meta]
+    if not ids:
+        return ids, None
+
+    weights = [1.0] * len(ids)
+
+    # (a) Hotspot por região: direciona `hotspot_weight` da massa de pedidos
+    #     para os restaurantes da região alvo.
+    if config.hotspot_region and 0.0 < config.hotspot_weight < 1.0:
+        target_idx = [i for i, m in enumerate(rests_meta) if str(m.get("h3")) == str(config.hotspot_region)]
+        if target_idx:
+            others_idx = [i for i in range(len(ids)) if i not in set(target_idx)]
+            w_target = config.hotspot_weight / len(target_idx)
+            w_other = (1.0 - config.hotspot_weight) / max(1, len(others_idx))
+            for i in target_idx:
+                weights[i] = w_target
+            for i in others_idx:
+                weights[i] = w_other
+            log.info(f"[cenário] hotspot região {config.hotspot_region}: "
+                     f"{len(target_idx)} restaurantes recebendo {config.hotspot_weight:.0%} da demanda")
+        else:
+            log.warning(f"[cenário] nenhum restaurante na região {config.hotspot_region} — hotspot ignorado")
+
+    # (b) Concentração: `restaurant_concentration` da massa em `hot_restaurant_count` restaurantes.
+    elif 0.0 < config.restaurant_concentration < 1.0:
+        k = min(config.hot_restaurant_count, len(ids))
+        hot_idx = set(random.sample(range(len(ids)), k))
+        cold_idx = [i for i in range(len(ids)) if i not in hot_idx]
+        w_hot = config.restaurant_concentration / k
+        w_cold = (1.0 - config.restaurant_concentration) / max(1, len(cold_idx))
+        for i in range(len(ids)):
+            weights[i] = w_hot if i in hot_idx else w_cold
+        log.info(f"[cenário] concentração: {k} restaurantes recebendo "
+                 f"{config.restaurant_concentration:.0%} da demanda")
+
+    return ids, weights
+
+
+async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
+    """Reduz temporariamente a disponibilidade de entregadores marcando uma
+    fração deles como OFFLINE (simula indisponibilidade)."""
+    if not (0.0 < config.courier_outage_pct < 1.0):
+        return
+
+    couriers = []
+    page = 1
+    while True:
+        body = await _request(client, "GET", CRUD_URL, f"/couriers?page={page}&itemsPerPage=500", sem, config)
+        if body:
+            couriers.extend([c["id_courier"] for c in body.get("data", [])])
+            if body.get("has_more"):
+                page += 1
+            else:
+                break
+        else:
+            break
+
+    if not couriers:
+        log.warning("[cenário] sem entregadores para aplicar outage")
+        return
+
+    n_off = int(len(couriers) * config.courier_outage_pct)
+    offline = random.sample(couriers, n_off)
+    tasks = [
+        _request(client, "PATCH", TRACKING_URL, "/tracking/status", sem, config,
+                 json={"ID_courier": cid, "status": "OFFLINE"})
+        for cid in offline
+    ]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
+             f"({config.courier_outage_pct:.0%})")
+
+async def order_emitter(client, users, restaurants, config, weights=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
@@ -354,7 +476,11 @@ async def order_emitter(client, users, restaurants, config):
         t_start = time.perf_counter()
 
         u_id = random.choice(users)
-        r_id = random.choice(restaurants)
+        # Amostragem ponderada quando há cenário de hotspot/concentração.
+        if weights is not None:
+            r_id = random.choices(restaurants, weights=weights, k=1)[0]
+        else:
+            r_id = random.choice(restaurants)
 
         task = asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config))
         tasks.add(task)
@@ -379,15 +505,20 @@ async def main():
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
         sem_init = asyncio.Semaphore(10)
-        users, restaurants = await fetch_existing_ids(client, sem_init, config)
+        users, restaurants, rests_meta = await fetch_existing_ids(client, sem_init, config)
 
         if not users or not restaurants:
             log.error("Banco vazio! Rode o populate.py antes.")
             return
 
         log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
-        await order_emitter(client, users, restaurants, config)
-        
+
+        # Cenários operacionais (A2): população ponderada + outage de entregadores.
+        population, weights = build_restaurant_population(rests_meta, config)
+        await apply_courier_outage(client, sem_init, config)
+
+        await order_emitter(client, users, population or restaurants, config, weights=weights)
+
     metrics.report(config)
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ resource "aws_kinesis_firehose_delivery_stream" "datalake_stream" {
     # Processador JQ para extrair o valor da chave "entidade" do seu JSON
     processing_configuration {
       enabled = true
-      
+
       processors {
         type = "MetadataExtraction"
         parameters {

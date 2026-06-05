@@ -377,6 +377,7 @@ resource "aws_ecs_task_definition" "order" {
       { name = "POSTGRES_ENDPOINT", value = var.database_url },
       { name = "DATABASE_URL", value = var.database_url },
       { name = "TRACKING_SERVICE_ENDPOINT", value = "http://${var.alb_dns_name}/" },
+      { name = "PREDICTION_SERVICE_ENDPOINT", value = var.prediction_service_endpoint },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },

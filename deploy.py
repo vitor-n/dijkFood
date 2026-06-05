@@ -176,6 +176,10 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         "routing-service": os.path.join("services", "routing-service", "Dockerfile"),
         "tracking-service": os.path.join("services", "tracking-service", "Dockerfile"),
         "order-service": os.path.join("services", "order-service", "Dockerfile"),
+        # Camada analítica / Objetivo 3
+        "dashboard-service": os.path.join("services", "dashboard-service", "Dockerfile"),
+        "prediction-service": os.path.join("services", "prediction-service", "Dockerfile"),
+        "assistant-service": os.path.join("services", "assistant-service", "Dockerfile"),
     }
 
     for service, dockerfile_path in services_dockerfiles.items():
@@ -185,17 +189,69 @@ def stage_build_push(outputs: dict[str, Any]) -> None:
         run_command(["docker", "build", "-f", dockerfile_path, "-t", tag, "./"], cwd=PROJECT_ROOT)
         run_command(["docker", "push", tag], cwd=PROJECT_ROOT)
 
+def stage_upload_ml_assets(outputs: dict[str, Any]) -> None:
+    """Empacota o código de treino (SageMaker) e o catálogo semântico no S3.
+
+    O Step Functions/SageMaker lê o sourcedir.tar.gz com o train_eta.py; o
+    assistant-service pode ler overrides do catálogo semântico em semantic/.
+    """
+    import io
+    import tarfile
+
+    bucket = outputs.get("datalake_bucket_name", {}).get("value")
+    if not bucket:
+        print("[ML] datalake_bucket_name ausente nos outputs — pulando upload de assets de ML.")
+        return
+
+    region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    s3 = boto3.client("s3", region_name=region)
+
+    # 1) sourcedir.tar.gz com o entrypoint de treino (script mode do SageMaker)
+    ml_dir = os.path.join(PROJECT_ROOT, "infra", "ml")
+    if os.path.isdir(ml_dir):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for fname in os.listdir(ml_dir):
+                fpath = os.path.join(ml_dir, fname)
+                if os.path.isfile(fpath):
+                    tar.add(fpath, arcname=fname)
+        buf.seek(0)
+        s3.put_object(Bucket=bucket, Key="ml/sourcedir.tar.gz", Body=buf.getvalue())
+        print(f"  [ML] sourcedir.tar.gz enviado para s3://{bucket}/ml/sourcedir.tar.gz")
+
+    # 2) Script do Glue ETL (curated/marts em Parquet)
+    glue_script = os.path.join(PROJECT_ROOT, "infra", "glue", "build_marts.py")
+    if os.path.isfile(glue_script):
+        with open(glue_script, "rb") as f:
+            s3.put_object(Bucket=bucket, Key="glue/build_marts.py", Body=f.read())
+        print(f"  [ML] Glue ETL enviado para s3://{bucket}/glue/build_marts.py")
+
+    # 3) Catálogo semântico (opcional — overrides do assistant-service)
+    sem_dir = os.path.join(PROJECT_ROOT, "infra", "semantic")
+    if os.path.isdir(sem_dir):
+        for fname in os.listdir(sem_dir):
+            fpath = os.path.join(sem_dir, fname)
+            if os.path.isfile(fpath) and fname.endswith(".json"):
+                with open(fpath, "rb") as f:
+                    s3.put_object(Bucket=bucket, Key=f"semantic/{fname}", Body=f.read(),
+                                  ContentType="application/json")
+        print(f"  [ML] catálogo semântico enviado para s3://{bucket}/semantic/")
+
+
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     print("\n═══ Novo deployment ECS (todas as services) ═══")
     region = outputs["aws_region"]["value"]
     cluster = outputs["ecs_cluster_name"]["value"]
     
-    # Todos os 4 serviços incluídos na lista de atualização
+    # Todos os serviços incluídos na lista de atualização
     services_to_deploy = [
-        "core_api_service_name", 
+        "core_api_service_name",
         "routing_service_name",
         "tracking_service_name",
-        "order_service_name"
+        "order_service_name",
+        "dashboard_service_name",
+        "prediction_service_name",
+        "assistant_service_name",
     ]
     
     for svc_key in services_to_deploy:
@@ -232,7 +288,10 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
         (f"{base}/docs", "core-api OpenAPI"),
         (f"{base}/routes/healthz", "routing-service"),
         (f"{base}/tracking/nearby?lat=-23.55&lon=-46.63", "tracking-service (nearby)",),
-        (f"{base}/order", "order-service")
+        (f"{base}/order", "order-service"),
+        (f"{base}/dashboard", "dashboard-service"),
+        (f"{base}/chat", "assistant-service"),
+        (f"{base}/model/info", "prediction-service"),
     ]
 
     for url, label in urls:
@@ -268,6 +327,9 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
 
     #Pega os outputs do comando do terraform, pra usar eles
     outputs = tf_output()
+
+    #Empacota e envia o código de treino (SageMaker) + catálogo semântico ao S3
+    stage_upload_ml_assets(outputs)
 
     #Roda os comandos docker (docker login, docker build e docker push pra cada imagem)
     stage_build_push(outputs)

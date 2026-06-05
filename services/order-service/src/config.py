@@ -26,4 +26,11 @@ class Settings:
     )
     FIREHOSE_STREAM_NAME: str = os.environ.get("FIREHOSE_STREAM_NAME", "PUT-S3-4k3iv")
 
+    # Predição de ETA (camada preditiva) — caminho com timeout curto + fallback
+    PREDICTION_SERVICE_ENDPOINT: str = os.environ.get(
+        "PREDICTION_SERVICE_ENDPOINT", "http://127.0.0.1:8005/"
+    )
+    ETA_TIMEOUT: float = float(os.environ.get("ETA_TIMEOUT", "0.4"))
+    ETA_FALLBACK_MIN: float = float(os.environ.get("ETA_FALLBACK_MIN", "35"))
+
 settings = Settings()

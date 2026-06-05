@@ -182,3 +182,102 @@ variable "order_max" {
   type        = number
   default     = 60
 }
+
+# ---------- Camada analítica / Objetivo 3 (ECS) ----------
+
+variable "dashboard_cpu" {
+  type    = number
+  default = 1024
+}
+variable "dashboard_memory" {
+  type    = number
+  default = 2048
+}
+variable "dashboard_desired" {
+  type    = number
+  default = 1
+}
+variable "dashboard_min" {
+  type    = number
+  default = 1
+}
+variable "dashboard_max" {
+  type    = number
+  default = 3
+}
+
+variable "prediction_cpu" {
+  type    = number
+  default = 2048
+}
+variable "prediction_memory" {
+  type    = number
+  default = 4096
+}
+variable "prediction_desired" {
+  type    = number
+  default = 1
+}
+variable "prediction_min" {
+  type    = number
+  default = 1
+}
+variable "prediction_max" {
+  type    = number
+  default = 4
+}
+
+variable "assistant_cpu" {
+  type    = number
+  default = 1024
+}
+variable "assistant_memory" {
+  type    = number
+  default = 2048
+}
+variable "assistant_desired" {
+  type    = number
+  default = 1
+}
+variable "assistant_min" {
+  type    = number
+  default = 1
+}
+variable "assistant_max" {
+  type    = number
+  default = 4
+}
+
+# ---------- Camada conversacional (Bedrock) ----------
+
+variable "assistant_use_bedrock" {
+  description = "Habilita o Bedrock no assistant-service (fallback determinístico se desabilitado/sem acesso)"
+  type        = bool
+  default     = true
+}
+
+variable "bedrock_region" {
+  description = "Região do Bedrock (pode ser conta/região distinta com acesso ao modelo)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "bedrock_model_id" {
+  description = "Model ID do Bedrock para o text-to-SQL"
+  type        = string
+  default     = "anthropic.claude-3-haiku-20240307-v1:0"
+}
+
+# ---------- Pipeline de ML ----------
+
+variable "ml_retrain_schedule" {
+  description = "Periodicidade do retreino do ETA (EventBridge Scheduler)"
+  type        = string
+  default     = "rate(1 day)"
+}
+
+variable "alert_email" {
+  description = "E-mail para receber alertas de anomalia via SNS (opcional)"
+  type        = string
+  default     = ""
+}

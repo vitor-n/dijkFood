@@ -1,8 +1,22 @@
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, BigInteger, TIMESTAMP, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+
+
+class OutboxEvent(Base):
+    """Transactional outbox: gravado na MESMA transação do pedido."""
+    __tablename__ = "outbox_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    entidade = Column(String(64), nullable=False)
+    acao = Column(String(32), nullable=False)
+    dados = Column(JSONB, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    published_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, server_default=text("0"))
 
 class Restaurant(Base):
     __tablename__ = "restaurants"
@@ -40,6 +54,8 @@ class OrderCreationRequest(BaseModel):
 class OrderCreationResponse(BaseModel):
     id_order: int
     id_courier: int
+    eta_minutes: float | None = None
+    eta_source: str | None = None
 
 class OrderUpdateRequest(BaseModel):
     id_order: int

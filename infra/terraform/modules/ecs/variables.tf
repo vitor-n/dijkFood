@@ -201,3 +201,9 @@ variable "firehose_stream_name" {
   description = "Nome do stream do Firehose para os serviços publicarem eventos"
   type        = string
 }
+
+variable "prediction_service_endpoint" {
+  description = "Base URL do prediction-service (via ALB) para predição de ETA"
+  type        = string
+  default     = "http://127.0.0.1:8005/"
+}

@@ -2,10 +2,24 @@
 Extensão de models.py com as tabelas que a core-api precisa ler/escrever
 para histórico de pedidos e menu de restaurantes.
 """
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, TIMESTAMP, BigInteger, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .models import Base
+
+
+class OutboxEvent(Base):
+    """Transactional outbox — eventos analíticos gravados junto do dado de domínio."""
+    __tablename__ = "outbox_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    entidade = Column(String(64), nullable=False)
+    acao = Column(String(32), nullable=False)
+    dados = Column(JSONB, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    published_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, server_default=text("0"))
 
 
 class OrderState(Base):

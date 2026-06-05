@@ -64,3 +64,59 @@ output "load_tester_instance_id" {
   value       = module.load_tester.instance_id
 }
 
+# ──────────────────────────────────────────────
+#  Camada analítica / Objetivo 3
+# ──────────────────────────────────────────────
+
+output "datalake_bucket_name" {
+  description = "Bucket S3 do datalake (Firehose, modelos, previsões, catálogo semântico)"
+  value       = module.datalake.datalake_bucket_name
+}
+
+output "glue_database_name" {
+  description = "Database do Glue Data Catalog"
+  value       = module.datalake.glue_database_name
+}
+
+output "athena_workgroup_name" {
+  description = "Workgroup do Athena"
+  value       = module.datalake.athena_workgroup_name
+}
+
+output "dashboard_service_name" {
+  value = module.dashboard_service.service_name
+}
+
+output "prediction_service_name" {
+  value = module.prediction_service.service_name
+}
+
+output "assistant_service_name" {
+  value = module.assistant_service.service_name
+}
+
+output "dashboard_url" {
+  description = "URL do dashboard analítico"
+  value       = "${module.alb.dns_name}/dashboard"
+}
+
+output "assistant_url" {
+  description = "URL do assistente conversacional"
+  value       = "${module.alb.dns_name}/chat"
+}
+
+output "ml_state_machine_arn" {
+  description = "Step Functions de retreino do ETA"
+  value       = module.ml_pipeline.state_machine_arn
+}
+
+output "position_forwarder_lambda" {
+  description = "Lambda de CDC das posições (DynamoDB Streams → Firehose)"
+  value       = module.position_forwarder.function_name
+}
+
+output "outbox_publisher_lambda" {
+  description = "Lambda relay do outbox transacional (RDS → Firehose)"
+  value       = module.position_forwarder.outbox_publisher_name
+}
+
