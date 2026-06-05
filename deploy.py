@@ -160,8 +160,6 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None, arn_role) -> None
 
 def stage_build_push(outputs: dict[str, Any]) -> None:
     print("\n═════════ Fazendo deploy das imagens docker (ECR) ═════════")
-
-    check_docker_ready()
     
     #Pega a região e a url de algum dos repositórios pra poder fazer login com o cli
     region = outputs["aws_region"]["value"]
@@ -416,12 +414,14 @@ def main() -> None:
         return
 
     if action == "update":
+        check_docker_ready()
         out = tf_output()
         stage_build_push(out)
         stage_force_ecs_deploy(out)
         return
 
     if action == "deploy":
+        check_docker_ready()
         run_full_deploy(db_user, db_pass_env, arn_role)
         return
 
@@ -431,6 +431,7 @@ def main() -> None:
         return
 
     if action == "all":
+        check_docker_ready()
         outputs = run_full_deploy(db_user, db_pass_env, arn_role)
         stage_run_load_test(outputs)
         if _truthy("SKIP_DESTROY"):
