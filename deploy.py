@@ -128,13 +128,13 @@ def stage_terraform_init() -> None:
 
 
 def stage_terraform_plan(db_user: str, db_pass: str | None) -> None:
-    print("\n═══ Terraform plan ═══")
+    print("\n=== Terraform plan ===")
     args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass)]
     execute_terraform_command(args)
 
 
 def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
-    print("\n═════════ Aplicando infraestrutura definida no Terraform ═════════")
+    print("\n========= Aplicando infraestrutura definida no Terraform =========")
     args = [
         "apply",
         "-auto-approve",
@@ -146,7 +146,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
 
 
 def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
-    print("\n═════════ Destruindo a infraestrutura com Terraform ═════════")
+    print("\n========= Destruindo a infraestrutura com Terraform =========")
     args = [
         "destroy",
         "-auto-approve",
@@ -237,7 +237,7 @@ def stage_upload_ml_assets(outputs: dict[str, Any]) -> None:
 
 
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
-    print("\n═══ Novo deployment ECS (todas as services) ═══")
+    print("\n=== Novo deployment ECS (todas as services) ===")
     region = outputs["aws_region"]["value"]
     cluster = outputs["ecs_cluster_name"]["value"]
     
