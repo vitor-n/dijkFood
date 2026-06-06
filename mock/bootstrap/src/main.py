@@ -109,7 +109,7 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
         return None
     return body.get("id_restaurant") or body.get("id")
 
-
+# TODO: reimplementar criação de itens de menu quando endpoint estiver pronto
 # async def create_menu_item(
 #     client: httpx.AsyncClient,
 #     sem: asyncio.Semaphore,
@@ -199,6 +199,7 @@ async def run_bootstrap() -> dict:
             [create_restaurant(client, sem) for _ in range(NUM_RESTAURANTS)],
         )
 
+        #TODO: reimplementar criação de itens de menu quando endpoint estiver pronto
         # ── Itens de menu ───────────────────────────────────────────────────
         # item_ids: dict[int, list[int]] = {}
         # if rest_result.created:

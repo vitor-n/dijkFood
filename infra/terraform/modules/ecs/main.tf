@@ -253,7 +253,7 @@ resource "aws_appautoscaling_policy" "core_api_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.core_api_alb_resource_label
     }
-    target_value       = 500.0
+    target_value       = 100
     scale_in_cooldown  = 120
     scale_out_cooldown = 30
   }
@@ -300,7 +300,7 @@ resource "aws_appautoscaling_policy" "routing_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.routing_alb_resource_label
     }
-    target_value       = 20
+    target_value       = 10
     scale_in_cooldown  = 60
     scale_out_cooldown = 30
   }
@@ -505,7 +505,7 @@ resource "aws_appautoscaling_policy" "tracking_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.tracking_alb_resource_label
     }
-    target_value       = 350.0
+    target_value       = 250
     scale_in_cooldown  = 120
     scale_out_cooldown = 60
   }
@@ -548,7 +548,7 @@ resource "aws_appautoscaling_policy" "order_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.order_alb_resource_label
     }
-    target_value       = 50.0
+    target_value       = 30
     scale_in_cooldown  = 120
     scale_out_cooldown = 60
   }

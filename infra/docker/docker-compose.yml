@@ -21,11 +21,9 @@ services:
 
   dynamodb-local:
     image: amazon/dynamodb-local:latest
-    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data/"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
     ports:
       - "8004:8000"
-    volumes:
-      - dynamodb_data:/home/dynamodblocal/data
     networks:
       - dijkfood
 
@@ -38,9 +36,8 @@ services:
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - /bin/sh
-      - -c
       - |
         until aws dynamodb list-tables --endpoint-url http://dynamodb-local:8000 >/dev/null 2>&1; do
           sleep 2
@@ -130,6 +127,7 @@ services:
     profiles: ["tools"]
     environment:
       BASE_URL: http://core-api:8000
+      CRUD_URL: http://core-api:8000
       NUM_USERS: ${BOOTSTRAP_USERS:-100}
       NUM_RESTAURANTS: ${BOOTSTRAP_RESTAURANTS:-20}
       NUM_COURIERS: ${BOOTSTRAP_COURIERS:-80}

@@ -99,7 +99,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-rds-"
-  description = "Allow PostgreSQL from ECS tasks and the outbox-publisher Lambda"
+  description = "Allow PostgreSQL from ECS tasks, Lambda, and VPC"
   vpc_id      = module.networking.vpc_id
 
   ingress {
@@ -115,6 +115,14 @@ resource "aws_security_group" "rds" {
     from_port       = 5432
     to_port         = 5432
     security_groups = [aws_security_group.lambda.id]
+  }
+
+  ingress {
+    description = "Allow PostgreSQL from within VPC"
+    protocol    = "tcp"
+    from_port   = 5432
+    to_port     = 5432
+    cidr_blocks = [var.vpc_cidr]
   }
 
   egress {

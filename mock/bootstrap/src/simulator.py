@@ -1,13 +1,11 @@
 """
 DijkFood - Simulador de Carga e Ciclo de Vida
 =================================================
-Versão Final: Combina os endpoints corretos de microsserviços com a 
-emissão cadenciada, delays realistas e métricas granulares por rota.
 
 Uso:
-  python load_simulator.py                 # cenário padrão (10 req/s)
-  SCENARIO=peak python load_simulator.py   # 50 req/s
-  SCENARIO=event python load_simulator.py  # 200 req/s
+  python simulator.py                 # cenário padrão (10 req/s)
+  SCENARIO=peak python simulator.py   # 50 req/s
+  SCENARIO=event python simulator.py  # 200 req/s
 """
 
 import asyncio
@@ -31,7 +29,7 @@ from utils import get_random_sp_coordinate
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("simulator")
@@ -69,10 +67,10 @@ class SimConfig:
     orders_per_second: float = 0.0
     duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
-    delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
-    delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
-    delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
-    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
+    delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 5.0))
+    delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 10.0))
+    delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 5.0))
+    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 10.0))
     tracking_lifetime: float = float(os.getenv("TRACKING_LIFETIME", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
@@ -111,7 +109,7 @@ class SimConfig:
             self.courier_outage_pct = 0.6
 
 # ---------------------------------------------------------------------------
-# Métricas Granulares (Para provar isolamento)
+# Métricas Granulares
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -132,9 +130,11 @@ class Metrics:
             "status": status
         })
 
-    def report(self, config: SimConfig):
+    def report(self, config: SimConfig, duration_seconds: Optional[float] = None):
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
+        if duration_seconds is not None:
+            print(f"Tempo total desde o início até finalizar: {duration_seconds:.1f}s")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
         print(f"Pedidos não criados: {self.orders_not_created}")
         print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
@@ -202,7 +202,6 @@ metrics = Metrics()
 async def _request(
     client: httpx.AsyncClient, method: str, base_url: str, path: str, sem: asyncio.Semaphore, config: SimConfig, **kwargs
 ):
-    """Executa requisição com Retry, medindo latência exata."""
     url = f"{base_url}{path}"
     
     for attempt in range(1, config.max_retries + 1):
@@ -211,20 +210,22 @@ async def _request(
             try:
                 resp = await client.request(method, url, **kwargs)
                 latency = (time.perf_counter() - t0) * 1000
+                
+                # Registra latência apenas de requisições concluídas
                 metrics.record_latency(path, method, latency, resp.status_code)
                 
                 if resp.status_code in (200, 201):
                     try: return resp.json()
                     except: return {}
-                else:
-                    return None
+                return None
+                
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                latency = (time.perf_counter() - t0) * 1000
-                metrics.record_latency(path, method, latency, 0)
+                # Apenas incrementa erro, evita sujar estatísticas com tempo de timeout local
                 metrics.errors += 1
                 
         if attempt < config.max_retries:
             await asyncio.sleep(0.3 * (2 ** (attempt - 1)))
+            
     return None
 
 async def fetch_route(client, sem, config, orig_lat, orig_lon, dest_lat, dest_lon):
@@ -304,7 +305,7 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
         log.warning(f"Falha ao avançar para READY_FOR_PICKUP no pedido {order_id}. Finalizando execução sem simular rota.")
         return
     ## Estado 3 -> 4 (READY_FOR_PICKUP -> PICKED_UP)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(5.0)
     result = await advance(OrderState.PICKED_UP)
     if not result:
         metrics.orders_failed += 1
@@ -352,9 +353,9 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
     users = []
     rests = []
     rests_meta = []  # [{id, h3}] — usado pelos cenários (hotspot/concentração)
-
+    MAX_PAGES = 100 # Limite para evitar loops infinitos em caso de falhas no endpoint
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
         if u_body:
             users.extend([u["id_user"] for u in u_body.get("data", [])])
@@ -366,7 +367,7 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
             break
 
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)
         if r_body:
             for r in r_body.get("data", []):
@@ -495,11 +496,12 @@ async def order_emitter(client, users, restaurants, config, weights=None):
 
 async def main():
     config = SimConfig()
+    sim_start = time.perf_counter()
 
     if config.silent:
         logging.getLogger("httpx").setLevel(logging.ERROR)
 
-    print("Iniciando cénario:", config.scenario, "às", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
     limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
@@ -519,7 +521,8 @@ async def main():
 
         await order_emitter(client, users, population or restaurants, config, weights=weights)
 
-    metrics.report(config)
+    total_duration = time.perf_counter() - sim_start
+    metrics.report(config, total_duration)
 
 if __name__ == "__main__":
     print(BASE_URL)

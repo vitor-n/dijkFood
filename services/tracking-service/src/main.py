@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 import h3
 import aioboto3
+import botocore.exceptions
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 
 from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest, StatusUpdate
@@ -67,6 +68,14 @@ async def update_status(
 ):
     try:
         await repo.update_status(req.ID_courier, req.status)
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code == "ConditionalCheckFailedException":
+            raise HTTPException(
+                status_code=409,
+                detail="Courier is no longer available"
+            )
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"message": "status captured"}
