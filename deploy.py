@@ -400,6 +400,9 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
     #Pega os outputs do comando do terraform, pra usar eles
     outputs = tf_output()
 
+    # Inicializa o banco de dados RDS (Executa schema e seeds uma única vez de dentro da VPC)
+    stage_rds_init_via_ssm(outputs, db_user, db_password)
+
     #Empacota e envia o código de treino (SageMaker) + catálogo semântico ao S3
     stage_upload_ml_assets(outputs)
 
