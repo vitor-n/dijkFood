@@ -400,6 +400,8 @@ module "assistant_service" {
     { name = "USE_BEDROCK", value = tostring(var.assistant_use_bedrock) },
     { name = "BEDROCK_REGION", value = var.bedrock_region },
     { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
+    { name = "BEDROCK_AWS_ACCESS_KEY_ID", value = var.bedrock_aws_access_key_id },
+    { name = "BEDROCK_AWS_SECRET_ACCESS_KEY", value = var.bedrock_aws_secret_access_key },
   ])
 
   cluster_id            = module.ecs.cluster_id

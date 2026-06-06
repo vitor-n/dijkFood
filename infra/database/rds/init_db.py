@@ -4,7 +4,33 @@ import os
 import argparse
 import psycopg2
 
+def clear_dynamodb():
+    import boto3
+    try:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        dynamodb = boto3.resource("dynamodb", region_name=region)
+        table_name = os.environ.get("DYNAMO_TABLE", "CourierTracking")
+        table = dynamodb.Table(table_name)
+        
+        print(f"Purging DynamoDB table '{table_name}'...")
+        scan = None
+        count = 0
+        with table.batch_writer() as batch:
+            while scan is None or "LastEvaluatedKey" in scan:
+                if scan is not None:
+                    scan = table.scan(ExclusiveStartKey=scan["LastEvaluatedKey"])
+                else:
+                    scan = table.scan()
+                for item in scan.get("Items", []):
+                    batch.delete_item(Key={"ID_courier": item["ID_courier"]})
+                    count += 1
+        print(f"DynamoDB table purged successfully! {count} items removed.")
+    except Exception as e:
+        print(f"[Warning] Failed to purge DynamoDB: {e}")
+
 def main():
+    clear_dynamodb()
+    
     parser = argparse.ArgumentParser(description="Initialize dijkFood RDS database")
     parser.add_argument("--host", help="RDS database host")
     parser.add_argument("--user", help="Database user")

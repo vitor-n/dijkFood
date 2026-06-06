@@ -170,15 +170,12 @@ async def ingest_batch(
 
     return result
 
-# ---------------------------------------------------------------------------
-# Bootstrap principal
-# ---------------------------------------------------------------------------
-
 async def run_bootstrap() -> dict:
     """
     Executa o bootstrap completo e retorna os IDs criados:
       {"user_ids": [...], "restaurant_ids": [...], "item_ids": {...}, "courier_ids": [...]}
     """
+    
     sem = asyncio.Semaphore(CONCURRENCY)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
     limits  = httpx.Limits(max_connections=CONCURRENCY + 10, max_keepalive_connections=CONCURRENCY)
