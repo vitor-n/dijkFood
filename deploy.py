@@ -296,10 +296,10 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=45) as resp:
-                print(f"  [{label}] {url} → status do request HTTP {resp.status}")
+                print(f"  [{label}] {url} -> status do request HTTP {resp.status}")
         except urllib.error.HTTPError as exc:
             if exc.code in (400, 405, 422):
-                print(f"  ~ [{label}] {url} → status do request HTTP {exc.code} (aceito no teste de saúde)")
+                print(f"  ~ [{label}] {url} -> status do request HTTP {exc.code} (aceito no teste de saúde)")
             else:
                 raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: HTTP {exc.code}") from exc
         except Exception as exc:
@@ -350,7 +350,7 @@ def stage_rds_init_via_ssm(outputs: dict[str, Any], db_user: str, db_password: s
         "cat << \"EOF_LOOKUP\" > lookup-data.sql",
         lookup_content,
         "EOF_LOOKUP",
-        "pip3 install psycopg2-binary",
+        "pip3 install psycopg2-binary boto3",
         f"python3 init_db.py --host {rds_endpoint} --user {db_user} --dbname dijkfood " + (f"--password {db_password}" if db_password else "")
     ]
     

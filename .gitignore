@@ -6,6 +6,9 @@ cache/
 .venv
 .env
 
+*.zip
+*.txt
+
 # Terraform
 .terraform/
 *.tfstate
