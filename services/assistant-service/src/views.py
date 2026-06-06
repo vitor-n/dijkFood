@@ -13,44 +13,62 @@ from . import athena
 
 log = logging.getLogger("assistant.views")
 
+def _partition_filter(lookback_days: int) -> str:
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    dates = []
+    for i in range(-1, lookback_days + 2):
+        d = now - timedelta(days=i)
+        dates.append((d.strftime("%Y"), d.strftime("%m"), d.strftime("%d")))
+    dates = sorted(list(set(dates)))
+    clauses = [f"(year = '{y}' AND month = '{m}' AND day = '{d}')" for y, m, d in dates]
+    return f"({' OR '.join(clauses)})"
+
+p_filter = _partition_filter(60)
+
 # Ordem importa: vw_deliveries depende das demais.
 VIEW_DEFS: list[tuple[str, str]] = [
-    ("vw_orders", """
+    ("vw_orders", f"""
         SELECT dados.id_order        AS id_order,
-               from_iso8601_timestamp(event_timestamp) AS created_at,
+               cast(from_iso8601_timestamp(event_timestamp) as timestamp) AS created_at,
                dados.id_restaurant   AS id_restaurant,
                dados.id_user         AS id_user,
                dados.id_courier      AS id_courier
         FROM events
         WHERE entidade='Order' AND acao='CREATE' AND dados.id_order IS NOT NULL
+          AND {p_filter}
     """),
-    ("vw_order_transitions", """
+    ("vw_order_transitions", f"""
         SELECT dados.id_order AS id_order, 1 AS id_state, 'Confirmado' AS state_name,
-               from_iso8601_timestamp(event_timestamp) AS changed_at
+               cast(from_iso8601_timestamp(event_timestamp) as timestamp) AS changed_at
         FROM events WHERE entidade='Order' AND acao='CREATE' AND dados.id_order IS NOT NULL
+          AND {p_filter}
         UNION ALL
         SELECT dados.id_order, dados.id_state,
                CASE dados.id_state
                     WHEN 2 THEN 'Preparando' WHEN 3 THEN 'Pronto para retirada'
                     WHEN 4 THEN 'Retirado'   WHEN 5 THEN 'Em transito'
                     WHEN 6 THEN 'Entregue'   ELSE 'Desconhecido' END,
-               from_iso8601_timestamp(event_timestamp)
+               cast(from_iso8601_timestamp(event_timestamp) as timestamp)
         FROM events WHERE entidade='Order' AND acao='UPDATE' AND dados.id_order IS NOT NULL
+          AND {p_filter}
     """),
-    ("vw_restaurants", """
+    ("vw_restaurants", f"""
         SELECT dados.id_restaurant AS id_restaurant,
                max(dados.name)     AS name,
                max(dados.h3_index) AS region,
                max(dados.lat)      AS lat,
                max(dados.lon)      AS lon
         FROM events WHERE entidade='Restaurant' AND dados.id_restaurant IS NOT NULL
+          AND {p_filter}
         GROUP BY dados.id_restaurant
     """),
-    ("vw_positions", """
+    ("vw_positions", f"""
         SELECT dados.id_courier AS id_courier, dados.lat AS lat, dados.lon AS lon,
                dados.status AS status,
-               from_iso8601_timestamp(event_timestamp) AS reported_at
+               cast(from_iso8601_timestamp(event_timestamp) as timestamp) AS reported_at
         FROM events WHERE entidade='Position' AND dados.id_courier IS NOT NULL
+          AND {p_filter}
     """),
     ("vw_deliveries", """
         SELECT o.id_order, o.created_at, o.id_restaurant, r.region,

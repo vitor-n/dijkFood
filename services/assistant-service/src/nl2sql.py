@@ -23,11 +23,14 @@ _bedrock = None
 def _client():
     global _bedrock
     if _bedrock is None:
-        _bedrock = boto3.client(
-            "bedrock-runtime",
-            region_name=settings.BEDROCK_REGION,
-            config=BotoConfig(retries={"max_attempts": 2, "mode": "standard"}, read_timeout=25),
-        )
+        kwargs = {
+            "region_name": settings.BEDROCK_REGION,
+            "config": BotoConfig(retries={"max_attempts": 2, "mode": "standard"}, read_timeout=25),
+        }
+        if settings.BEDROCK_AWS_ACCESS_KEY_ID and settings.BEDROCK_AWS_SECRET_ACCESS_KEY:
+            kwargs["aws_access_key_id"] = settings.BEDROCK_AWS_ACCESS_KEY_ID
+            kwargs["aws_secret_access_key"] = settings.BEDROCK_AWS_SECRET_ACCESS_KEY
+        _bedrock = boto3.client("bedrock-runtime", **kwargs)
     return _bedrock
 
 

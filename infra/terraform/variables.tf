@@ -268,6 +268,20 @@ variable "bedrock_model_id" {
   default     = "amazon.nova-micro-v1:0"
 }
 
+variable "bedrock_aws_access_key_id" {
+  description = "Chave de acesso AWS para a conta real (opcional, para usar o Bedrock cross-account)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "bedrock_aws_secret_access_key" {
+  description = "Chave secreta AWS para a conta real (opcional, para usar o Bedrock cross-account)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ---------- Pipeline de ML ----------
 
 variable "ml_retrain_schedule" {

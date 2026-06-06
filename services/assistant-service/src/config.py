@@ -21,6 +21,10 @@ class Settings:
     USE_BEDROCK: bool = os.environ.get("USE_BEDROCK", "true").lower() in ("1", "true", "yes")
     BEDROCK_REGION: str = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "us-east-1"))
     BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0")
+    
+    # Credenciais opcionais exclusivas do Bedrock para contas secundárias/reais (evita conflito com Athena no Academy)
+    BEDROCK_AWS_ACCESS_KEY_ID: str | None = os.environ.get("BEDROCK_AWS_ACCESS_KEY_ID")
+    BEDROCK_AWS_SECRET_ACCESS_KEY: str | None = os.environ.get("BEDROCK_AWS_SECRET_ACCESS_KEY")
 
     # Segurança da execução de SQL
     MAX_ROWS: int = int(os.environ.get("ASSISTANT_MAX_ROWS", "200"))
