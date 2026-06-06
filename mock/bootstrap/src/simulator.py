@@ -189,7 +189,7 @@ class Metrics:
             else:
                 p50 = p95 = p99 = latencies[0]
             # Alerta visual se passar de 500ms
-            p95_str = f"{p95:6.1f}ms" + (" ⚠️" if p95 > 500 else "")
+            p95_str = f"{p95:6.1f}ms" + (" [!]" if p95 > 500 else "    ")
             print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str:<9s} | {p99:6.1f}ms")
         print("=" * 92)
 
