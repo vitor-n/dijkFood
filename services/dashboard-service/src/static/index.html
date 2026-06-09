@@ -133,7 +133,7 @@
       <span class="pill"><span class="dot"></span> lake near-real-time</span>
       <div class="item"><div class="k">Janela</div><div class="v" id="lookback">—</div></div>
       <div class="item"><div class="k">Atualizado</div><div class="v" id="updated">—</div></div>
-      <a class="refresh" href="/chat" style="text-decoration:none;color:var(--text);background:rgba(52,227,176,.12);border-color:rgba(52,227,176,.3)">
+      <a class="refresh" href="__ASSISTANT_URL__" style="text-decoration:none;color:var(--text);background:rgba(52,227,176,.12);border-color:rgba(52,227,176,.3)">
         💬 Assistente
       </a>
       <button class="refresh" id="refreshBtn" onclick="load()">
@@ -370,8 +370,8 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','
 async function loadPredictions(){
   try {
     const [demand, anom] = await Promise.all([
-      fetch("/predict/demand", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
-      fetch("/predict/anomalies", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
+      fetch("/dashboard/api/demand", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
+      fetch("/dashboard/api/anomalies", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
     ]);
     renderForecast(demand); renderAnomalies(anom);
   } catch(e){

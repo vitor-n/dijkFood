@@ -241,13 +241,12 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     region = outputs["aws_region"]["value"]
     cluster = outputs["ecs_cluster_name"]["value"]
     
-    # Todos os serviços incluídos na lista de atualização
+    # Serviços ECS (o dashboard NÃO está aqui — roda numa EC2 dedicada)
     services_to_deploy = [
         "core_api_service_name",
         "routing_service_name",
         "tracking_service_name",
         "order_service_name",
-        "dashboard_service_name",
         "prediction_service_name",
         "assistant_service_name",
     ]
@@ -273,7 +272,30 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
 
     alb_dns = outputs["alb_dns_name"]["value"]
     print(f"\n  Link da API com deploy: http://{alb_dns}")
-    
+
+
+def stage_refresh_dashboard_ec2(outputs: dict[str, Any]) -> None:
+    """Força a EC2 do dashboard a (re)puxar a imagem recém-publicada via SSM."""
+    instance_id = outputs.get("dashboard_instance_id", {}).get("value")
+    if not instance_id:
+        print("  [dashboard] instance_id ausente — pulando refresh do dashboard.")
+        return
+    region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    ssm = boto3.client("ssm", region_name=region)
+    try:
+        ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [
+                "for i in $(seq 1 20); do [ -x /usr/local/bin/run-dashboard.sh ] && break; sleep 5; done",
+                "/usr/local/bin/run-dashboard.sh || true",
+            ]},
+        )
+        url = outputs.get("dashboard_url", {}).get("value", "")
+        print(f"  [dashboard] refresh solicitado na EC2 ({instance_id}). URL: {url}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [dashboard] falha ao solicitar refresh (a EC2 se auto-atualiza via user-data): {exc}")
+
 
 def stage_smoke_test(outputs: dict[str, Any]) -> None:
     print("\n======== Testando os serviços com deploy (via ALB) ========")
@@ -287,7 +309,6 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
         (f"{base}/routes/healthz", "routing-service"),
         (f"{base}/tracking/nearby?lat=-23.55&lon=-46.63", "tracking-service (nearby)",),
         (f"{base}/order", "order-service"),
-        (f"{base}/dashboard", "dashboard-service"),
         (f"{base}/chat", "assistant-service"),
         (f"{base}/model/info", "prediction-service"),
     ]
@@ -304,6 +325,16 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
                 raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: HTTP {exc.code}") from exc
         except Exception as exc:
             raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: {exc}") from exc
+
+    # Dashboard roda numa EC2 dedicada; pode levar ~1-2 min para puxar a imagem.
+    # Check tolerante (não derruba o deploy se ainda estiver subindo).
+    dash_url = outputs.get("dashboard_url", {}).get("value")
+    if dash_url:
+        try:
+            with urllib.request.urlopen(dash_url + "/healthz", timeout=15) as resp:
+                print(f"  [dashboard-ec2] {dash_url} -> status {resp.status}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ~ [dashboard-ec2] {dash_url} ainda subindo a imagem na EC2 ({exc}).")
 
     print("  Teste de saúde concluído.")
 
@@ -409,8 +440,11 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
     #Roda os comandos docker (docker login, docker build e docker push pra cada imagem)
     stage_build_push(outputs)
 
-    #atualiza o ECS pra poder rodar 
+    #atualiza o ECS pra poder rodar
     stage_force_ecs_deploy(outputs)
+
+    #atualiza o container do dashboard na EC2 dedicada (imagem recém-publicada)
+    stage_refresh_dashboard_ec2(outputs)
 
     #Faz um check básico da saúde dos serviços
     stage_smoke_test(outputs)
@@ -556,6 +590,7 @@ def main() -> None:
         out = tf_output()
         stage_build_push(out)
         stage_force_ecs_deploy(out)
+        stage_refresh_dashboard_ec2(out)
         return
 
     if action == "deploy":

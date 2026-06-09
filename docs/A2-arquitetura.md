@@ -19,12 +19,12 @@ Usuários ─HTTP─▶ ALB ─▶ core-api / order-service / tracking-service /
                                                                                          │
                                                               Glue Data Catalog + Athena
                                                   ┌──────────────────┼─────────────────────┐
-                                          dashboard-service   prediction-service     assistant-service
-                                          (6 indicadores +    (ETA sync + batch        (NL → SQL,
-                                           preditivo)          demanda/anomalia)        Bedrock+fallback)
+                                       dashboard (EC2)       prediction-service     assistant-service
+                                       (6 indicadores +      (ETA sync + batch        (NL → SQL,
+                                        preditivo via S3)     demanda/anomalia)        Bedrock+fallback)
                                                                      │  │
                             EventBridge → Step Functions → SageMaker Training → Model Registry
-                                                                     │  └─▶ SNS (alertas de anomalia)
+                                                                        │
                                                               S3 models/eta + predictions/
 ```
 
@@ -47,6 +47,14 @@ As **posições reportadas** dos entregadores vivem no DynamoDB; entram no lake 
 **CDC**: DynamoDB Streams → Lambda `position-forwarder` → mesmo Firehose
 (at-least-once nativo do stream).
 
+**Necessidade do outbox (revisão de custo):** mantido. É o mecanismo que dá
+*durabilidade forte* (atomicidade evento↔operação), exatamente o ponto cobrado na
+avaliação ("se o envio ao Firehose falhar, o evento pode ser perdido"). O custo é
+desprezível (uma Lambda invocada a cada 1 min, ~1.440 invocações/dia) frente aos
+itens caros (Fargate, RDS Multi-AZ, NAT). Alternativa considerada — envio direto
+ao Firehose com retry — foi descartada porque perde eventos se o Firehose estiver
+indisponível durante a janela de retry. Custo baixo, ganho de corretude alto → fica.
+
 ### 2.2 Medallion: raw → curated → marts
 - **raw** (Firehose → S3): JSON/GZIP, partição dinâmica `entidade/year/month/day`.
 - **curated** (Glue Job, **Parquet**): `curated_orders`, `curated_deliveries`,
@@ -62,11 +70,17 @@ casar com a restrição de só termos a LabRole. O **raw permanece JSON** (forma
 nativo do Firehose para payload heterogêneo); **curated/marts são Parquet** — é
 exatamente o que o diagrama indica.
 
-### 2.3 Dashboard
-`dashboard-service` (ECS/Fargate, Plotly) computa via Athena os 6 indicadores
-obrigatórios + 2 métricas de estado instantâneo (pedidos abertos por estado;
-entregadores ativos/disponíveis), e um **painel preditivo** (forecast de demanda
-+ anomalias). UI escura, responsiva, com auto-refresh e cache server-side.
+### 2.3 Dashboard (EC2 dedicada)
+O dashboard (Plotly) computa via Athena os 6 indicadores obrigatórios + 2
+métricas de estado instantâneo (pedidos abertos por estado; entregadores
+ativos/disponíveis), e um **painel preditivo** (forecast de demanda + anomalias,
+lido **diretamente do S3** — desacoplado do prediction-service). UI escura,
+responsiva, com auto-refresh e cache server-side.
+
+**Decisão (custo):** o dashboard roda numa **única EC2** (`modules/dashboard-ec2`),
+não em ECS/Fargate — o tráfego é baixo e previsível e não justifica
+autoscaling. A instância usa o `LabInstanceProfile` para consultar Athena/S3 e
+roda o container do dashboard (porta 80); o `deploy.py` atualiza a imagem via SSM.
 
 ## 3. Capacidade preditiva (ciclo de vida completo)
 
@@ -76,8 +90,7 @@ entregadores ativos/disponíveis), e um **painel preditivo** (forecast de demand
 | Treino | RandomForest (ETA) + target-encoding restaurante/região |
 | **Registro** | **SageMaker Model Registry** (Model Package Group `dijkfood-eta`, versão *Approved* por execução) |
 | Implantação | artefato `joblib` no S3 (`models/eta/model.joblib`), servido em memória pelo ECS, hot-reload |
-| **Monitoramento** | `/model/info` (MAE holdout vs. baseline) + **CloudWatch alarms** nas Lambdas → **SNS** |
-| **Alertas** | anomalias de severidade alta publicadas no **SNS** pelo batch |
+| **Monitoramento** | `/model/info` (MAE holdout vs. baseline) + logs no CloudWatch |
 | Integração | `order-service` chama `/predict/eta` (concorrente, timeout+fallback) |
 
 - **ETA fora do caminho serial**: a predição é disparada com
@@ -86,8 +99,8 @@ entregadores ativos/disponíveis), e um **painel preditivo** (forecast de demand
   Internamente tem timeout curto (400 ms) + fallback determinístico; em qualquer
   falha a operação segue normalmente. O ETA volta na resposta e no evento.
 - **Demanda por região/horário** e **detecção de anomalias** (z-score de demanda;
-  MAD para entregas lentas) são geradas em **batch** → `s3://…/predictions/`.
-  Anomalias altas → **SNS** (alerta real, com alarme no CloudWatch também).
+  MAD para entregas lentas) são geradas em **batch** → `s3://…/predictions/`,
+  consumidas pelo dashboard e pelo assistente.
 - **Retreino gerenciado**: `EventBridge Scheduler → Step Functions →
   SageMaker Training Job → Lambda ml-callback` (promove o artefato para serving,
   **registra a versão no Model Registry**, recarrega o modelo no ECS e roda o
@@ -138,9 +151,11 @@ alimentam a tabela comparativa do relatório.
 
 Módulos Terraform: `datalake` (Firehose + Glue Catalog + Athena + **Glue Job
 curated/marts**), `lambda` (position-forwarder + **outbox-publisher na VPC**),
-`app-service` (genérico ECS+ALB), `ml` (Step Functions + SageMaker + EventBridge
-+ callback). Recursos raiz: **SNS** + **CloudWatch alarms** + **SageMaker Model
-Package Group**. Toda compute usa a **LabRole** (sem criação de IAM).
+`app-service` (genérico ECS+ALB para prediction/assistant), `dashboard-ec2`
+(EC2 dedicada do dashboard), `ml` (Step Functions + SageMaker + EventBridge +
+callback). Recurso raiz: **SageMaker Model Package Group**. Toda compute usa a
+**LabRole** (sem criação de IAM). *Sem SNS/CloudWatch alarms* — cortados por
+custo; o monitoramento é via logs do CloudWatch e `/model/info`.
 
 `deploy.py` estende o fluxo da A1: build/push das 3 novas imagens; upload do
 `ml/sourcedir.tar.gz` (treino), do `glue/build_marts.py` (ETL) e do catálogo
@@ -165,7 +180,8 @@ Endpoints: `/dashboard` · `/chat` · `POST /predict/eta` · `GET /model/info` �
 - **Parquet**: curated/marts são Parquet (Glue CTAS); raw é JSON (Firehose).
 - **Model Registry / Training / Batch**: SageMaker de fato (registry + training job + batch via prediction-service).
 - **Serving**: ECS (decisão de robustez) — não Serverless Inference.
-- **SNS**: tópico real + alarmes CloudWatch + publicação de anomalias.
+- **SNS**: removido por custo; anomalias ficam em S3 e aparecem no dashboard.
+- **Dashboard**: EC2 dedicada (não ECS) — decisão de custo/simplicidade.
 - **Frontend**: SPA server-rendered (FastAPI+Plotly) unificando dashboard +
   preditivo + chat — escolhido por robustez sob carga (alternativa React/Streamlit
   descrita no relatório).

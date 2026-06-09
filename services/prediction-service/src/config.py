@@ -31,8 +31,5 @@ class Settings:
 
     MIN_TRAIN_SAMPLES: int = int(os.environ.get("MIN_TRAIN_SAMPLES", "40"))
 
-    # Tópico SNS para alertas de anomalia (opcional)
-    SNS_TOPIC_ARN: str = os.environ.get("SNS_TOPIC_ARN", "")
-
 
 settings = Settings()

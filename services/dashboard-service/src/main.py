@@ -8,11 +8,13 @@ A UI (Plotly) é servida estaticamente; os dados vêm de /dashboard/api/data.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import boto3
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -26,6 +28,23 @@ log = logging.getLogger("dashboard")
 app = FastAPI(title="DijkFood · Dashboard Analítico")
 
 _STATIC = Path(__file__).parent / "static"
+_s3 = boto3.client("s3", region_name=settings.AWS_REGION)
+
+
+def _read_pred_json(key: str) -> dict[str, Any]:
+    """Lê uma previsão materializada pelo prediction-service direto do S3.
+
+    Desacopla o dashboard do prediction-service (ele pode rodar isolado numa EC2):
+    a camada preditiva publica em s3://<bucket>/predictions/*, o dashboard lê dali.
+    """
+    if not settings.DATALAKE_BUCKET:
+        return {}
+    try:
+        obj = _s3.get_object(Bucket=settings.DATALAKE_BUCKET, Key=key)
+        return json.loads(obj["Body"].read())
+    except Exception as exc:  # noqa: BLE001
+        log.info("previsão '%s' indisponível: %s", key, exc)
+        return {}
 
 
 @app.get("/healthz", tags=["ops"])
@@ -140,7 +159,20 @@ async def dashboard_data():
     })
 
 
+@app.get("/dashboard/api/demand")
+async def dashboard_demand():
+    return JSONResponse(await asyncio.to_thread(_read_pred_json, "predictions/demand/latest.json"))
+
+
+@app.get("/dashboard/api/anomalies")
+async def dashboard_anomalies():
+    return JSONResponse(await asyncio.to_thread(_read_pred_json, "predictions/anomalies/latest.json"))
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/dashboard/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
 async def dashboard_page():
-    return HTMLResponse((_STATIC / "index.html").read_text(encoding="utf-8"))
+    html = (_STATIC / "index.html").read_text(encoding="utf-8")
+    html = html.replace("__ASSISTANT_URL__", settings.ASSISTANT_URL)
+    return HTMLResponse(html)

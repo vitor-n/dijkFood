@@ -22,7 +22,6 @@ from .config import settings
 
 log = logging.getLogger("prediction.batch")
 _s3 = boto3.client("s3", region_name=settings.AWS_REGION)
-_sns = boto3.client("sns", region_name=settings.AWS_REGION)
 
 _DEMAND_KEY = f"{settings.PRED_PREFIX}/demand/latest.json"
 _ANOM_KEY = f"{settings.PRED_PREFIX}/anomalies/latest.json"
@@ -184,38 +183,11 @@ def _iso(value: str) -> str:
     return dt.isoformat() if dt else str(value)
 
 
-def _publish_alerts(anomalies: dict[str, Any]) -> None:
-    """Publica anomalias de severidade alta no SNS (alertas operacionais)."""
-    if not settings.SNS_TOPIC_ARN:
-        return
-    high = [a for a in anomalies.get("anomalies", []) if a.get("severity") == "high"]
-    if not high:
-        return
-    lines = [f"⚠️ {len(high)} anomalia(s) de severidade ALTA detectada(s) na operação DijkFood:", ""]
-    for a in high[:20]:
-        if a["type"] == "demand_spike":
-            lines.append(f"• Pico de demanda na região {a['region']} em {a['at']}: "
-                         f"{a['value']} pedidos (esperado ~{a['expected']}, z={a['zscore']})")
-        elif a["type"] == "slow_deliveries":
-            lines.append(f"• Entregas lentas na região {a['region']}: {a['count']} acima de "
-                         f"{a['threshold_min']} min (mediana {a['median_min']} min)")
-    try:
-        _sns.publish(
-            TopicArn=settings.SNS_TOPIC_ARN,
-            Subject="DijkFood — alerta de anomalia operacional",
-            Message="\n".join(lines),
-        )
-        log.info("alerta SNS publicado (%d anomalias altas)", len(high))
-    except Exception as exc:  # noqa: BLE001
-        log.warning("falha ao publicar alerta SNS: %s", exc)
-
-
 def run_and_store() -> dict[str, Any]:
     demand = forecast_demand()
     anomalies = detect_anomalies()
     _put_json(_DEMAND_KEY, demand)
     _put_json(_ANOM_KEY, anomalies)
-    _publish_alerts(anomalies)
     return {
         "demand_regions": len(demand.get("region_profiles", [])),
         "anomalies": anomalies.get("count", 0),

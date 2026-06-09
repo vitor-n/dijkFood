@@ -20,5 +20,11 @@ class Settings:
     # Janela default das consultas (dias)
     LOOKBACK_DAYS: int = int(os.environ.get("DASHBOARD_LOOKBACK_DAYS", "30"))
 
+    # Bucket do datalake (lê as previsões publicadas pelo prediction-service)
+    DATALAKE_BUCKET: str = os.environ.get("DATALAKE_BUCKET", "")
+
+    # URL do assistente conversacional (no ALB) — o dashboard roda numa EC2 à parte
+    ASSISTANT_URL: str = os.environ.get("ASSISTANT_URL", "/chat")
+
 
 settings = Settings()

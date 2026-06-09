@@ -183,7 +183,15 @@ variable "order_max" {
   default     = 60
 }
 
-# ---------- Camada analítica / Objetivo 3 (ECS) ----------
+# ---------- Camada analítica / Objetivo 3 ----------
+
+# Dashboard roda numa EC2 dedicada (sem ECS). As variáveis dashboard_cpu/memory/
+# desired/min/max abaixo ficam apenas por compatibilidade e não são mais usadas.
+variable "dashboard_instance_type" {
+  description = "Tipo da EC2 que hospeda o dashboard"
+  type        = string
+  default     = "t3.small"
+}
 
 variable "dashboard_cpu" {
   type    = number
@@ -288,10 +296,4 @@ variable "ml_retrain_schedule" {
   description = "Periodicidade do retreino do ETA (EventBridge Scheduler)"
   type        = string
   default     = "rate(1 day)"
-}
-
-variable "alert_email" {
-  description = "E-mail para receber alertas de anomalia via SNS (opcional)"
-  type        = string
-  default     = ""
 }

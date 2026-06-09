@@ -83,8 +83,9 @@ output "athena_workgroup_name" {
   value       = module.datalake.athena_workgroup_name
 }
 
-output "dashboard_service_name" {
-  value = module.dashboard_service.service_name
+output "dashboard_instance_id" {
+  description = "ID da EC2 que hospeda o dashboard"
+  value       = module.dashboard_ec2.instance_id
 }
 
 output "prediction_service_name" {
@@ -96,8 +97,8 @@ output "assistant_service_name" {
 }
 
 output "dashboard_url" {
-  description = "URL do dashboard analítico"
-  value       = "${module.alb.dns_name}/dashboard"
+  description = "URL do dashboard analítico (EC2 dedicada)"
+  value       = module.dashboard_ec2.url
 }
 
 output "assistant_url" {

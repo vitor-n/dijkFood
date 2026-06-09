@@ -317,38 +317,27 @@ module "position_forwarder" {
 }
 
 # ──────────────────────────────────────────────
-#  Serviços analíticos (ECS) — Objetivo 3
+#  Dashboard — EC2 estática dedicada (sem ECS/autoscaling, baixo custo)
 # ──────────────────────────────────────────────
-module "dashboard_service" {
-  source = "./modules/app-service"
+module "dashboard_ec2" {
+  source = "./modules/dashboard-ec2"
 
-  project_name = var.project_name
-  name         = "dashboard-service"
-  aws_region   = var.aws_region
-  image        = module.ecr.repository_urls["dashboard-service"]
+  project_name  = var.project_name
+  aws_region    = var.aws_region
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
+  instance_type = var.dashboard_instance_type
+  image         = module.ecr.repository_urls["dashboard-service"]
 
-  container_port = 8004
-  cpu            = var.dashboard_cpu
-  memory         = var.dashboard_memory
-  desired_count  = var.dashboard_desired
-  min_count      = var.dashboard_min
-  max_count      = var.dashboard_max
-
-  environment = local.analytics_env
-
-  cluster_id            = module.ecs.cluster_id
-  cluster_name          = module.ecs.cluster_name
-  execution_role_arn    = data.aws_iam_role.lab_role.arn
-  task_role_arn         = data.aws_iam_role.lab_role.arn
-  private_subnet_ids    = module.networking.private_subnet_ids
-  ecs_security_group_id = aws_security_group.ecs_tasks.id
-  vpc_id                = module.networking.vpc_id
-
-  listener_arn           = module.alb.http_listener_arn
-  listener_rule_priority = 130
-  path_patterns          = ["/dashboard", "/dashboard/*"]
+  glue_database    = module.datalake.glue_database_name
+  athena_workgroup = module.datalake.athena_workgroup_name
+  datalake_bucket  = module.datalake.datalake_bucket_name
+  assistant_url    = "${local.alb_base_url}/chat"
 }
 
+# ──────────────────────────────────────────────
+#  Serviços analíticos (ECS) — Objetivo 3
+# ──────────────────────────────────────────────
 module "prediction_service" {
   source = "./modules/app-service"
 
@@ -364,9 +353,7 @@ module "prediction_service" {
   min_count      = var.prediction_min
   max_count      = var.prediction_max
 
-  environment = concat(local.analytics_env, [
-    { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
-  ])
+  environment = local.analytics_env
 
   cluster_id            = module.ecs.cluster_id
   cluster_name          = module.ecs.cluster_name
@@ -432,53 +419,6 @@ module "ml_pipeline" {
   model_package_group = aws_sagemaker_model_package_group.eta.model_package_group_name
 
   schedule_expression = var.ml_retrain_schedule
-}
-
-# ──────────────────────────────────────────────
-#  Alertas — SNS + CloudWatch alarms
-# ──────────────────────────────────────────────
-resource "aws_sns_topic" "alerts" {
-  name = "${var.project_name}-alerts"
-}
-
-resource "aws_sns_topic_subscription" "alerts_email" {
-  count     = var.alert_email == "" ? 0 : 1
-  topic_arn = aws_sns_topic.alerts.arn
-  protocol  = "email"
-  endpoint  = var.alert_email
-}
-
-resource "aws_cloudwatch_metric_alarm" "outbox_errors" {
-  alarm_name          = "${var.project_name}-outbox-publisher-errors"
-  alarm_description   = "Erros no relay do outbox transacional — risco de perda/atraso de eventos analíticos."
-  namespace           = "AWS/Lambda"
-  metric_name         = "Errors"
-  statistic           = "Sum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 1
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  treat_missing_data  = "notBreaching"
-
-  dimensions    = { FunctionName = module.position_forwarder.outbox_publisher_name }
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
-}
-
-resource "aws_cloudwatch_metric_alarm" "position_forwarder_errors" {
-  alarm_name          = "${var.project_name}-position-forwarder-errors"
-  alarm_description   = "Erros no CDC de posições (DynamoDB Streams → Firehose)."
-  namespace           = "AWS/Lambda"
-  metric_name         = "Errors"
-  statistic           = "Sum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 1
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  treat_missing_data  = "notBreaching"
-
-  dimensions    = { FunctionName = module.position_forwarder.function_name }
-  alarm_actions = [aws_sns_topic.alerts.arn]
 }
 
 # SageMaker Model Registry — versionamento dos modelos de ETA
