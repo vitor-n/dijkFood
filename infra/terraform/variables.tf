@@ -297,3 +297,9 @@ variable "ml_retrain_schedule" {
   type        = string
   default     = "rate(1 day)"
 }
+
+variable "enable_ml_pipeline" {
+  description = "Liga a pipeline gerenciada (Step Functions + SageMaker + EventBridge + Model Registry). Desligue para deploys de teste mais rápidos/confiáveis — o ETA continua garantido pelo prediction-service no ECS."
+  type        = bool
+  default     = true
+}

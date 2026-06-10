@@ -107,8 +107,8 @@ output "assistant_url" {
 }
 
 output "ml_state_machine_arn" {
-  description = "Step Functions de retreino do ETA"
-  value       = module.ml_pipeline.state_machine_arn
+  description = "Step Functions de retreino do ETA (null se a pipeline estiver desligada)"
+  value       = one(module.ml_pipeline[*].state_machine_arn)
 }
 
 output "position_forwarder_lambda" {

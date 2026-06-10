@@ -409,6 +409,7 @@ module "assistant_service" {
 # ──────────────────────────────────────────────
 module "ml_pipeline" {
   source = "./modules/ml"
+  count  = var.enable_ml_pipeline ? 1 : 0
 
   project_name        = var.project_name
   role_arn            = data.aws_iam_role.lab_role.arn
@@ -416,15 +417,16 @@ module "ml_pipeline" {
   glue_database       = module.datalake.glue_database_name
   athena_workgroup    = module.datalake.athena_workgroup_name
   prediction_url      = local.alb_base_url
-  model_package_group = aws_sagemaker_model_package_group.eta.model_package_group_name
+  model_package_group = one(aws_sagemaker_model_package_group.eta[*].model_package_group_name)
 
   schedule_expression = var.ml_retrain_schedule
 }
 
 # SageMaker Model Registry — versionamento dos modelos de ETA
 resource "aws_sagemaker_model_package_group" "eta" {
+  count                           = var.enable_ml_pipeline ? 1 : 0
   model_package_group_name        = "${var.project_name}-eta"
-  model_package_group_description = "Versões aprovadas do modelo de predição de ETA"
+  model_package_group_description = "Approved ETA prediction model versions"
 }
 
 # ──────────────────────────────────

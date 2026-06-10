@@ -17,7 +17,7 @@ data "aws_ami" "amazon_linux" {
 
 resource "aws_security_group" "dashboard" {
   name_prefix = "${var.project_name}-dashboard-"
-  description = "Dashboard EC2 — HTTP público"
+  description = "Dashboard EC2 public HTTP"
   vpc_id      = var.vpc_id
 
   ingress {
