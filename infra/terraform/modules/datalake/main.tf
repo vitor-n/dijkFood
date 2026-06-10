@@ -22,7 +22,7 @@ resource "aws_kinesis_firehose_delivery_stream" "datalake_stream" {
 
 
     buffering_size     = 128
-    buffering_interval = 300
+    buffering_interval = 60
 
     # TÓPICO 3: Compressão
     compression_format = "GZIP"
