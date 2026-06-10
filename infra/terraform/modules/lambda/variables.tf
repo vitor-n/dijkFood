@@ -12,6 +12,11 @@ variable "firehose_stream_name" {
   type        = string
 }
 
+variable "firehose_stream_arn" {
+  description = "ARN do Delivery stream do Firehose de destino (usado pelo Pipe)"
+  type        = string
+}
+
 variable "dynamodb_stream_arn" {
   description = "ARN do DynamoDB Stream da tabela de posições"
   type        = string

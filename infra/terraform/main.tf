@@ -305,6 +305,7 @@ module "position_forwarder" {
   project_name         = var.project_name
   lambda_role_arn      = data.aws_iam_role.lab_role.arn
   firehose_stream_name = module.datalake.firehose_stream_name
+  firehose_stream_arn  = module.datalake.firehose_stream_arn
   dynamodb_stream_arn  = module.dynamodb.courier_positions_stream_arn
 
   # outbox-publisher (VPC → RDS → Firehose)

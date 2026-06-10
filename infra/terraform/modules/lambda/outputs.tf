@@ -1,9 +1,5 @@
-output "function_name" {
-  value = aws_lambda_function.position_forwarder.function_name
-}
-
-output "function_arn" {
-  value = aws_lambda_function.position_forwarder.arn
+output "pipe_name" {
+  value = aws_pipes_pipe.position_forwarder.name
 }
 
 output "outbox_publisher_name" {

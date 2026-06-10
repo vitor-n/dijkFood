@@ -2,48 +2,38 @@
 #  position-forwarder — Lambda que leva o CDC do DynamoDB ao Firehose
 # ──────────────────────────────────────────────────────────────────────────────
 
-data "archive_file" "position_forwarder" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../../lambda/position_forwarder"
-  output_path = "${path.module}/.build/position_forwarder.zip"
-  excludes    = ["__pycache__", "*.pyc"]
-}
+resource "aws_pipes_pipe" "position_forwarder" {
+  name     = "${var.project_name}-position-forwarder"
+  role_arn = var.lambda_role_arn
+  source   = var.dynamodb_stream_arn
+  target   = var.firehose_stream_arn
 
-resource "aws_cloudwatch_log_group" "position_forwarder" {
-  name              = "/aws/lambda/${var.project_name}-position-forwarder"
-  retention_in_days = 7
-}
-
-resource "aws_lambda_function" "position_forwarder" {
-  function_name = "${var.project_name}-position-forwarder"
-  role          = var.lambda_role_arn
-  handler       = "index.handler"
-  runtime       = "python3.12"
-  timeout       = 60
-  memory_size   = 256
-
-  filename         = data.archive_file.position_forwarder.output_path
-  source_code_hash = data.archive_file.position_forwarder.output_base64sha256
-
-  environment {
-    variables = {
-      FIREHOSE_STREAM_NAME = var.firehose_stream_name
+  source_parameters {
+    dynamodb_stream_parameters {
+      starting_position                  = "LATEST"
+      batch_size                         = 500
+      maximum_batching_window_in_seconds = 30
+      maximum_retry_attempts             = 3
     }
   }
 
-  depends_on = [aws_cloudwatch_log_group.position_forwarder]
+  target_parameters {
+    input_template = <<EOF
+{
+  "timestamp": "<aws.pipes.event.ingestion-time>",
+  "entidade": "Position",
+  "acao": "REPORT",
+  "dados": {
+    "id_courier": <$.dynamodb.NewImage.ID_courier.N>,
+    "lat": <$.dynamodb.NewImage.lat.N>,
+    "lon": <$.dynamodb.NewImage.lon.N>,
+    "status": "<$.dynamodb.NewImage.status.S>",
+    "cell_index": "<$.dynamodb.NewImage.cell_index.S>",
+    "updated_at": <$.dynamodb.NewImage.updated_at.N>
+  }
 }
-
-resource "aws_lambda_event_source_mapping" "courier_stream" {
-  event_source_arn                   = var.dynamodb_stream_arn
-  function_name                      = aws_lambda_function.position_forwarder.arn
-  starting_position                  = "LATEST"
-  batch_size                         = 500
-  maximum_batching_window_in_seconds = 30
-
-  # Não deixa um lote problemático travar o stream (sem regressão da operação).
-  maximum_retry_attempts         = 3
-  bisect_batch_on_function_error = true
+EOF
+  }
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

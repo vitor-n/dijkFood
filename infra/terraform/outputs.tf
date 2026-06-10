@@ -111,9 +111,9 @@ output "ml_state_machine_arn" {
   value       = one(module.ml_pipeline[*].state_machine_arn)
 }
 
-output "position_forwarder_lambda" {
-  description = "Lambda de CDC das posições (DynamoDB Streams → Firehose)"
-  value       = module.position_forwarder.function_name
+output "position_forwarder_pipe" {
+  description = "Pipe de CDC das posições (DynamoDB Streams → Firehose)"
+  value       = module.position_forwarder.pipe_name
 }
 
 output "outbox_publisher_lambda" {
