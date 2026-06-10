@@ -1,0 +1,30 @@
+#!/bin/bash
+set -x
+dnf install -y docker
+systemctl enable --now docker
+
+# Script idempotente que (re)sobe o container do dashboard a partir do ECR.
+cat >/usr/local/bin/run-dashboard.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+IMAGE="${image}:latest"
+REGION="${region}"
+REG_HOST="$(echo "$IMAGE" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REG_HOST"
+docker pull "$IMAGE"
+docker rm -f dashboard 2>/dev/null || true
+docker run -d --name dashboard --restart unless-stopped -p 80:8004 \
+  -e AWS_REGION="$REGION" -e AWS_DEFAULT_REGION="$REGION" \
+  -e GLUE_DATABASE="${glue_db}" \
+  -e ATHENA_WORKGROUP="${athena_wg}" \
+  -e DATALAKE_BUCKET="${bucket}" \
+  -e ASSISTANT_URL="${assistant_url}" \
+  "$IMAGE"
+SCRIPT
+chmod +x /usr/local/bin/run-dashboard.sh
+
+# Reenta até a imagem existir no ECR (o deploy.py faz o push após o apply).
+for i in $(seq 1 60); do
+  /usr/local/bin/run-dashboard.sh && exit 0
+  sleep 30
+done
