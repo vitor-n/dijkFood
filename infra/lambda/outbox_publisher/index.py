@@ -15,6 +15,7 @@ Env: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, FIREHOSE_STREAM_NAME,
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_vendor"))
 
@@ -114,15 +115,23 @@ def _process_batch(conn) -> int:
 
 
 def handler(event, _context):
+    end_time = time.time() + 55  # Mantém a Lambda viva por 55 segundos
     conn = _connect()
     total = 0
     try:
         _ensure_table(conn)
-        for _ in range(MAX_BATCHES):
-            n = _process_batch(conn)
-            total += n
-            if n < BATCH_LIMIT:
-                break
+        while time.time() < end_time:
+            batch_total = 0
+            for _ in range(MAX_BATCHES):
+                n = _process_batch(conn)
+                batch_total += n
+                total += n
+                if n < BATCH_LIMIT:
+                    break
+            
+            # Se não encontrou nenhum evento novo para processar, aguarda 5 segundos
+            if batch_total == 0:
+                time.sleep(5)
     finally:
         try:
             conn.close()
