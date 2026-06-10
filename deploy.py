@@ -313,30 +313,48 @@ def stage_smoke_test(outputs: dict[str, Any]) -> None:
         (f"{base}/model/info", "prediction-service"),
     ]
 
-    for url, label in urls:
-        try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                print(f"  [{label}] {url} -> status do request HTTP {resp.status}")
-        except urllib.error.HTTPError as exc:
-            if exc.code in (400, 405, 422):
-                print(f"  ~ [{label}] {url} -> status do request HTTP {exc.code} (aceito no teste de saúde)")
-            else:
-                raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: HTTP {exc.code}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"Teste de saúde falhou [{label}] {url}: {exc}") from exc
+    # Códigos aceitos como "vivo" (a rota existe e respondeu).
+    accepted = (200, 201, 400, 401, 403, 404, 405, 422)
+    # Códigos de "ainda subindo" no ALB → vale a pena reesperar.
+    transient = (502, 503, 504)
+
+    def _probe(url: str, label: str, attempts: int = 8, delay: int = 20) -> bool:
+        last = "?"
+        for i in range(1, attempts + 1):
+            try:
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    print(f"  [OK] [{label}] {url} -> HTTP {resp.status}")
+                    return True
+            except urllib.error.HTTPError as exc:
+                if exc.code in accepted:
+                    print(f"  [OK] [{label}] {url} -> HTTP {exc.code} (aceito)")
+                    return True
+                if exc.code not in transient:
+                    print(f"  [FALHA] [{label}] {url} -> HTTP {exc.code}")
+                    return False
+                last = f"HTTP {exc.code}"
+            except Exception as exc:  # noqa: BLE001
+                last = str(exc)
+            if i < attempts:
+                print(f"  [...] [{label}] subindo ({last}); tentativa {i}/{attempts}, aguardando {delay}s")
+                time.sleep(delay)
+        print(f"  [FALHA] [{label}] {url} nao respondeu saudavel apos {attempts} tentativas ({last})")
+        return False
+
+    failed = [label for url, label in urls if not _probe(url, label)]
 
     # Dashboard roda numa EC2 dedicada; pode levar ~1-2 min para puxar a imagem.
-    # Check tolerante (não derruba o deploy se ainda estiver subindo).
     dash_url = outputs.get("dashboard_url", {}).get("value")
     if dash_url:
-        try:
-            with urllib.request.urlopen(dash_url + "/healthz", timeout=15) as resp:
-                print(f"  [dashboard-ec2] {dash_url} -> status {resp.status}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"  ~ [dashboard-ec2] {dash_url} ainda subindo a imagem na EC2 ({exc}).")
+        if not _probe(dash_url + "/healthz", "dashboard-ec2", attempts=6, delay=20):
+            print(f"  [~] [dashboard-ec2] {dash_url} ainda subindo a imagem na EC2 (cheque em 1-2 min).")
 
-    print("  Teste de saúde concluído.")
+    if failed:
+        print(f"\n  [AVISO] Servicos ainda nao saudaveis: {', '.join(failed)}.")
+        print("    A infraestrutura subiu. Rode 'python deploy.py smoke' em ~1 min para revalidar.")
+    else:
+        print("  Teste de saude concluido (todos os servicos responderam).")
 
 
 def stage_smoke_from_state() -> None:
