@@ -256,7 +256,10 @@ function empty(id, msg){
 
 function plot(id, traces, layoutExtra){
   const el = document.getElementById(id);
-  el.innerHTML = "";
+  // Se não for um gráfico Plotly ativo (ex: estava com a div de empty), nós limpamos o HTML
+  if (!el.classList.contains('js-plotly-plot')) {
+    el.innerHTML = "";
+  }
   Plotly.react(el, traces, Object.assign({}, structuredClone(BASE_LAYOUT), layoutExtra||{}), CFG);
 }
 

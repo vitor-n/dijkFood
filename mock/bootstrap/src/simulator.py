@@ -29,7 +29,7 @@ from utils import get_random_sp_coordinate
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("simulator")
@@ -65,7 +65,7 @@ SILENT = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "testing")
     orders_per_second: float = 0.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
+    duration_seconds: int = int(os.getenv("SIM_DURATION", 30))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 5.0))
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 10.0))
@@ -153,13 +153,13 @@ class Metrics:
         success = sum(1 for r in self.records if r["status"] in (200, 201))
         if len(all_lat) >= 2:
             gq = statistics.quantiles(all_lat, n=100)
-            g_p50, g_p95, g_p99 = gq[49], gq[94], gq[98]
+            g_p50, g_p95, g_p90 = gq[49], gq[94], gq[89]
         else:
-            g_p50 = g_p95 = g_p99 = all_lat[0]
+            g_p50 = g_p95 = g_p90 = all_lat[0]
         print(f"SLA GLOBAL | reqs: {total} | sucesso: {success} "
               f"({100*success/total:.1f}%) | erros HTTP: {http_errors} | erros rede/timeout: {net_errors} "
               f"| taxa de erro: {100*(http_errors+net_errors)/total:.2f}%")
-        print(f"Latência global | P50: {g_p50:.1f}ms | P95: {g_p95:.1f}ms | P99: {g_p99:.1f}ms "
+        print(f"Latência global | P50: {g_p50:.1f}ms | P95: {g_p95:.1f}ms | P90: {g_p90:.1f}ms "
               f"(requisito P95 < 500ms)")
         print("=" * 80)
 
@@ -176,7 +176,7 @@ class Metrics:
             key = f"{r['method']} {ep}"
             by_endpoint.setdefault(key, []).append(r["latency_ms"])
 
-        print(f"{'ENDPOINT':<33s} | {'COUNT':<6s} | {'AVG':<7s} | {'P50':<7s} | {'P95':<7s} | {'P99 (Req P95<500ms)':<19s}")
+        print(f"{'ENDPOINT':<33s} | {'COUNT':<6s} | {'AVG':<7s} | {'P50':<7s} | {'P90':<7s} | {'P95 (Req P95<500ms)':<19s}")
         print("-" * 92)
         for key, latencies in sorted(by_endpoint.items()):
             n = len(latencies)
@@ -185,12 +185,12 @@ class Metrics:
                 quantiles = statistics.quantiles(latencies, n=100)
                 p50 = quantiles[49]
                 p95 = quantiles[94]
-                p99 = quantiles[98]
+                p90 = quantiles[89]
             else:
-                p50 = p95 = p99 = latencies[0]
+                p50 = p95 = p90 = latencies[0]
             # Alerta visual se passar de 500ms
             p95_str = f"{p95:6.1f}ms" + (" [!]" if p95 > 500 else "    ")
-            print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str:<9s} | {p99:6.1f}ms")
+            print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p90:5.1f}ms | {p95_str:<19s}")
         print("=" * 92)
 
 metrics = Metrics()

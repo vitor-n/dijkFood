@@ -11,8 +11,8 @@ desacoplada do caminho crítico da operação.
 Usuários ─HTTP─▶ ALB ─▶ core-api / order-service / tracking-service / routing-service (A1)
                           │ (mesma transação)            │ (DynamoDB Streams · CDC)
                           ▼                               ▼
-                   RDS: outbox_events            Lambda position-forwarder
-                          │ (poll + retry)               │
+                   RDS: outbox_events             EventBridge Pipes
+                          │ (poll + batch)               │ (CDC DynamoDB)
                    Lambda outbox-publisher ──────────────┴────▶ Kinesis Firehose ──▶ S3 raw (JSON)
                                                                                          │
                                                               Glue Job (CTAS)  raw ─▶ curated ─▶ marts  (PARQUET)
@@ -44,8 +44,9 @@ pg8000) — varre as linhas pendentes (`FOR UPDATE SKIP LOCKED`), publica no
 - **Sem regressão de SLA**: a publicação é assíncrona (fora do request).
 
 As **posições reportadas** dos entregadores vivem no DynamoDB; entram no lake por
-**CDC**: DynamoDB Streams → Lambda `position-forwarder` → mesmo Firehose
-(at-least-once nativo do stream).
+**CDC nativo**: DynamoDB Streams → **EventBridge Pipes** → mesmo Firehose.
+Isso eliminou a necessidade da Lambda `position-forwarder`, reduzindo custos e pontos de falha
+ao conectar a origem ao destino de forma puramente serverless via Pipe.
 
 **Necessidade do outbox (revisão de custo):** mantido. É o mecanismo que dá
 *durabilidade forte* (atomicidade evento↔operação), exatamente o ponto cobrado na
@@ -69,6 +70,11 @@ Glue Trigger. Escolhemos CTAS+Python Shell (em vez de Spark) por custo e por
 casar com a restrição de só termos a LabRole. O **raw permanece JSON** (formato
 nativo do Firehose para payload heterogêneo); **curated/marts são Parquet** — é
 exatamente o que o diagrama indica.
+
+Para alcançar a **Arquitetura Lambda (Speed Layer)**, o Dashboard não lê as tabelas
+Parquet (que atualizam apenas de hora em hora). As queries do Dashboard apontam
+direto para a tabela crua `events` via *Partition Projection*, refletindo o dado
+que acabou de ser despachado pelo Firehose (buffer otimizado de 60 segundos).
 
 ### 2.3 Dashboard (EC2 dedicada)
 O dashboard (Plotly) computa via Athena os 6 indicadores obrigatórios + 2
@@ -150,7 +156,7 @@ alimentam a tabela comparativa do relatório.
 ## 6. Infraestrutura (IaC) e deploy
 
 Módulos Terraform: `datalake` (Firehose + Glue Catalog + Athena + **Glue Job
-curated/marts**), `lambda` (position-forwarder + **outbox-publisher na VPC**),
+curated/marts**), `lambda` (**EventBridge Pipes** + **outbox-publisher na VPC**),
 `app-service` (genérico ECS+ALB para prediction/assistant), `dashboard-ec2`
 (EC2 dedicada do dashboard), `ml` (Step Functions + SageMaker + EventBridge +
 callback). Recurso raiz: **SageMaker Model Package Group**. Toda compute usa a
@@ -176,8 +182,10 @@ Endpoints: `/dashboard` · `/chat` · `POST /predict/eta` · `GET /model/info` �
 `POST /batch/run` · `GET /predict/demand` · `GET /predict/anomalies`.
 
 ## 9. Reconciliação diagrama ↔ implementação
-- **Outbox/CDC**: implementado (tabela + Lambda publisher) — não é mais envio direto.
-- **Parquet**: curated/marts são Parquet (Glue CTAS); raw é JSON (Firehose).
+- **Outbox/CDC**: outbox (tabela + Lambda publisher) garante atomicidade no RDS.
+  O CDC do DynamoDB agora usa **EventBridge Pipes** direto para o Firehose (sem Lambda).
+- **Arquitetura Lambda / Speed Layer**: Dashboard consulta `events` (raw/JSON) com buffer de 60s no Firehose para near-real-time.
+- **Parquet**: curated/marts são Parquet (Glue CTAS) gerados para consolidação em batch.
 - **Model Registry / Training / Batch**: SageMaker de fato (registry + training job + batch via prediction-service).
 - **Serving**: ECS (decisão de robustez) — não Serverless Inference.
 - **SNS**: removido por custo; anomalias ficam em S3 e aparecem no dashboard.
