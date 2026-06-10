@@ -30,12 +30,16 @@ async def lifespan(app: FastAPI):
     if ep.startswith("http"):
         kwargs["endpoint_url"] = ep
 
+    from botocore.config import Config
+    boto_config = Config(max_pool_connections=200)
+    kwargs["config"] = boto_config
+
     # Client do Dynamo
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
         app.state.dynamodb = dynamo_resource
         
         # Client do Firehose
-        async with session.client("firehose", region_name=settings.AWS_REGION) as firehose_client:
+        async with session.client("firehose", region_name=settings.AWS_REGION, config=boto_config) as firehose_client:
             app.state.firehose_client = firehose_client
             yield
 

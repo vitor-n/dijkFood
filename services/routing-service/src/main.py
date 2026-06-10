@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     """
     _load_graph()
     limiter = anyio.to_thread.current_default_thread_limiter()
-    limiter.total_tokens = 2
+    limiter.total_tokens = 100
     print(f"[startup] threadpool limitado a {limiter.total_tokens} workers")
     yield
 

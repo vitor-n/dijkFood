@@ -30,6 +30,10 @@ async def lifespan(app: FastAPI):
     ep = (settings.DYNAMO_ENDPOINT or "").strip()
     if ep.startswith("http"):
         kwargs["endpoint_url"] = ep
+        
+    from botocore.config import Config
+    boto_config = Config(max_pool_connections=200)
+    kwargs["config"] = boto_config
 
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
         app.state.dynamodb = dynamo_resource

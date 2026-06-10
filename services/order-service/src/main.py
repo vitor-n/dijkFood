@@ -64,7 +64,8 @@ async def _resolve_eta(task: "asyncio.Task | None") -> dict:
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.http_client = httpx.AsyncClient(timeout=5.0)
+    limits = httpx.Limits(max_keepalive_connections=100, max_connections=1000)
+    app.state.http_client = httpx.AsyncClient(timeout=5.0, limits=limits)
     yield
     await app.state.http_client.aclose()
 
