@@ -1,97 +1,34 @@
 import os
-import pickle
-import functools
-import numpy as np
+import httpx
 from contextlib import asynccontextmanager
 
-import anyio
-import osmnx as ox
-import networkx as nx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
-from sklearn.neighbors import BallTree
-
-# Constantes 
-
-GRAPH_PATH = os.getenv("GRAPH_PATH", "/app/data/sao_paulo.pkl")
-AVERAGE_SPEED_MS = 40_000 / 3_600   # 40 km/h em m/s
-CACHE_SIZE = int(os.getenv("ROUTE_CACHE_SIZE", "2048"))
-
-# Estado do grafo (carregado uma vez por processo) 
-
-G: nx.MultiDiGraph
-node_ids: list[int]
-spatial_tree: BallTree
-node_coords: dict[int, list[float]]   # {node_id: [lat, lon]}
 
 
-def _load_graph() -> None:
-    global G, node_ids, spatial_tree, node_coords
+OSRM_URL = os.getenv("OSRM_URL", "http://localhost:5000")
 
-    with open(GRAPH_PATH, "rb") as f:
-        G = pickle.load(f)
-
-    # Mantém apenas o maior componente fortemente conectado (SCC).
-    scc = max(nx.strongly_connected_components(G), key=len)
-    G = G.subgraph(scc).copy()
-    print(f"[graph] {G.number_of_nodes()} nós · {G.number_of_edges()} arestas (maior SCC)")
-
-    nodes_gdf = ox.graph_to_gdfs(G, edges=False)
-    node_ids = nodes_gdf.index.tolist()
-
-    # BallTree com metrica haversine para snapping rapido de coordenadas.
-    coords_rad = np.radians(nodes_gdf[["y", "x"]].values)
-    spatial_tree = BallTree(coords_rad, metric="haversine")
-
-    # Dict pre-computado para lookup O(1) por node_id.
-    node_coords = {
-        nid: row[["y", "x"]].tolist()
-        for nid, row in nodes_gdf.iterrows()
-    }
-    print(f"[graph] índice espacial e dict de coords prontos ({len(node_coords)} nós)")
-
-
-
-# Cache de rotas 
-
-@functools.lru_cache(maxsize=CACHE_SIZE)
-def _compute_route(orig_node: int, dest_node: int) -> tuple[float, list]:
-    """
-    Executa Dijkstra bidirecional e retorna (distância_m, lista_de_coords).
-
-    Resultado cacheado por par de nós.
-    """
-    distance, route_nodes = nx.bidirectional_dijkstra(
-        G, orig_node, dest_node, weight="length"
-    )
-
-    path = [node_coords[n] for n in route_nodes]
-    return round(distance, 2), path
-
-
-# FastAPI 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Nota sobre concorrência:
-    - O threadpool abaixo permite múltiplas requisições simultâneas no mesmo
-      worker, mas as execuções de Dijkstra são serializadas dentro de cada
-      processo (GIL não é liberada em código Python puro).
-    - Paralelismo real de CPU vem dos --workers do Dockerfile (processos
-      separados, cada um com sua própria GIL e cópia do grafo em memória).
-    """
-    _load_graph()
-    limiter = anyio.to_thread.current_default_thread_limiter()
-    limiter.total_tokens = 100
-    print(f"[startup] threadpool limitado a {limiter.total_tokens} workers")
+    limits = httpx.Limits(max_keepalive_connections=100, max_connections=500)
+    app.state.client = httpx.AsyncClient(
+        base_url=OSRM_URL,
+        timeout=10.0,
+        limits=limits,
+    )
     yield
+    await app.state.client.aclose()
 
 
 app = FastAPI(title="DijkFood Routing Service", lifespan=lifespan)
 
 
-# Modelos 
+def get_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.client
+
+
+# ── Modelos ──────────────────────────────────────────────────────────────────
 
 class RouteRequest(BaseModel):
     orig_lat: float
@@ -106,7 +43,7 @@ class RouteResponse(BaseModel):
     path_nodes: list[list[float]]
 
 
-# Endpoints 
+# ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/healthz", tags=["ops"])
 @app.get("/routes/healthz", tags=["ops"])
@@ -115,29 +52,40 @@ async def healthz():
 
 
 @app.post("/routes/calculate", response_model=RouteResponse)
-def find_route(req: RouteRequest):
-    # 1. Snap para os nos mais proximos no grafo.
-    query_rad = np.radians([
-        [req.orig_lat, req.orig_lon],
-        [req.dest_lat, req.dest_lon],
-    ])
-    _, indices = spatial_tree.query(query_rad, k=1)
-    orig_node = node_ids[indices[0][0]]
-    dest_node = node_ids[indices[1][0]]
+async def find_route(
+    req: RouteRequest,
+    client: httpx.AsyncClient = Depends(get_client),
+):
+    # OSRM espera coordenadas no formato lon,lat (longitude primeiro)
+    coords = f"{req.orig_lon},{req.orig_lat};{req.dest_lon},{req.dest_lat}"
 
-    # 2. Dijkstra bidirecional (resultado cacheado por par de nos).
     try:
-        distance, path = _compute_route(orig_node, dest_node)
-    except nx.NetworkXNoPath:
+        r = await client.get(
+            f"/route/v1/driving/{coords}",
+            params={"overview": "full", "geometries": "geojson"},
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"OSRM backend indisponível: {exc}") from exc
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"OSRM retornou erro {r.status_code}: {r.text}")
+
+    data = r.json()
+
+    if data.get("code") != "Ok" or not data.get("routes"):
         raise HTTPException(
             status_code=422,
-            detail="Sem rota entre as coordenadas fornecidas.",
+            detail=f"Sem rota entre as coordenadas fornecidas. (OSRM code: {data.get('code')})",
         )
-    except nx.NodeNotFound as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+
+    route = data["routes"][0]
+
+    # GeoJSON retorna [lon, lat]; convertemos para [lat, lon] para manter
+    # compatibilidade com o contrato anterior da API
+    path_nodes = [[p[1], p[0]] for p in route["geometry"]["coordinates"]]
 
     return RouteResponse(
-        distance_meters=distance,
-        estimated_time_seconds=round(distance / AVERAGE_SPEED_MS, 1),
-        path_nodes=path,
+        distance_meters=route["distance"],
+        estimated_time_seconds=route["duration"],
+        path_nodes=path_nodes,
     )

@@ -107,16 +107,52 @@ services:
     networks:
       - dijkfood
 
+  # Serviço de inicialização: converte sao_paulo.osm → arquivos .osrm (roda UMA vez).
+  # Execute manualmente com: docker compose --profile tools run --rm osrm-init
+  # Pré-requisito: gerar sao_paulo.osm a partir do pkl com mock/bootstrap/src/pkl_to_osm.py
+  osrm-init:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    profiles: ["tools"]
+    volumes:
+      - ../../services/routing-service/data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      osrm-extract -p /opt/car.lua /data/sao_paulo.osm &&
+      osrm-partition /data/sao_paulo.osrm &&
+      osrm-customize /data/sao_paulo.osrm &&
+      echo "Pré-processamento OSRM concluído."
+    networks:
+      - dijkfood
+
+  # Motor de roteamento C++ — serve rotas via HTTP na porta 5000
+  osrm-backend:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    command: osrm-routed --algorithm MLD /data/sao_paulo.osrm --port 5000
+    volumes:
+      - ../../services/routing-service/data:/data:ro
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:5000/route/v1/driving/-46.6388,-23.5489;-46.6588,-23.5689?overview=false' | grep -q '\"code\":\"Ok\"' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - dijkfood
+
+  # Proxy FastAPI leve — recebe chamadas do simulador e repassa ao osrm-backend
   routing-service:
     build:
       context: ../../
       dockerfile: services/routing-service/Dockerfile
     environment:
-      GRAPH_PATH: /data/sao_paulo.pkl
+      OSRM_URL: http://osrm-backend:5000
     ports:
       - "8001:8001"
-    volumes:
-      - ../../services/routing-service/data:/data:ro
+    depends_on:
+      osrm-backend:
+        condition: service_healthy
     networks:
       - dijkfood
 

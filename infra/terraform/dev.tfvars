@@ -32,8 +32,8 @@ order_desired = 1
 order_min     = 1
 order_max     = 8
 
-routing_cpu     = 1024
-routing_memory  = 2048
+routing_cpu     = 2048
+routing_memory  = 4096
 routing_desired = 1
 routing_min     = 1
 routing_max     = 6

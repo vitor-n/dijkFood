@@ -236,6 +236,108 @@ def stage_upload_ml_assets(outputs: dict[str, Any]) -> None:
         print(f"  [ML] catálogo semântico enviado para s3://{bucket}/semantic/")
 
 
+def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
+    """Converte sao_paulo.pkl → arquivos .osrm e os salva no S3 usando a EC2 via SSM.
+
+    Fluxo:
+      1. Sobe o sao_paulo.pkl e o pkl_to_osm.py para o bucket S3 do grafo.
+      2. Na EC2 (via SSM): baixa os arquivos, converte pkl→osm, roda
+         osrm-extract / osrm-partition / osrm-customize via Docker.
+      3. Sincroniza os arquivos .osrm resultantes para s3://<bucket>/osrm/processed/.
+
+    Os containers ECS baixam os arquivos desse prefixo no startup.
+    """
+    print("\n======== Pré-processando grafo OSRM na EC2 ========")
+
+    graph_bucket = outputs.get("graph_bucket_name", {}).get("value")
+    if not graph_bucket:
+        raise RuntimeError("graph_bucket_name ausente nos outputs do Terraform.")
+
+    region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
+    if not instance_id:
+        raise RuntimeError("load_tester_instance_id ausente nos outputs — EC2 não encontrada.")
+
+    # 1. Sobe pkl e script de conversão para o S3
+    s3 = boto3.client("s3", region_name=region)
+
+    pkl_path  = os.path.join(PROJECT_ROOT, "services", "routing-service", "data", "sao_paulo.pkl")
+    conv_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "pkl_to_osm.py")
+
+    print(f"  Enviando sao_paulo.pkl ({os.path.getsize(pkl_path) // (1024*1024)} MB) para S3...")
+    s3.upload_file(pkl_path, graph_bucket, "osrm/sao_paulo.pkl")
+
+    with open(conv_path, "rb") as f:
+        s3.put_object(Bucket=graph_bucket, Key="osrm/pkl_to_osm.py", Body=f.read())
+
+    print(f"  Arquivos enviados para s3://{graph_bucket}/osrm/")
+
+    # 2. Script shell executado na EC2 via SSM
+    commands = [
+        "#!/bin/bash",
+        "set -e",
+        "cd /home/ec2-user",
+        # Instala dependências
+        "sudo dnf install -y python3-pip docker",
+        "sudo systemctl start docker",
+        "pip3 install networkx boto3 --quiet",
+        # Cria diretório de trabalho isolado
+        "rm -rf osrm_build && mkdir -p osrm_build && cd osrm_build",
+        # Baixa pkl e script do S3
+        f"aws s3 cp s3://{graph_bucket}/osrm/sao_paulo.pkl . --region {region}",
+        f"aws s3 cp s3://{graph_bucket}/osrm/pkl_to_osm.py . --region {region}",
+        # Converte pkl → .osm
+        "echo '>>> Convertendo pkl para .osm...'",
+        "python3 pkl_to_osm.py sao_paulo.pkl sao_paulo.osm",
+        "echo '>>> Conversão concluída'",
+        # Pré-processa com OSRM via Docker (sem instalação nativa)
+        "sudo docker pull ghcr.io/project-osrm/osrm-backend:v5.27.1",
+        "echo '>>> Rodando osrm-extract...'",
+        "sudo docker run --rm -v $(pwd):/data ghcr.io/project-osrm/osrm-backend:v5.27.1 "
+        "osrm-extract -p /opt/car.lua /data/sao_paulo.osm",
+        "echo '>>> Rodando osrm-partition...'",
+        "sudo docker run --rm -v $(pwd):/data ghcr.io/project-osrm/osrm-backend:v5.27.1 "
+        "osrm-partition /data/sao_paulo.osrm",
+        "echo '>>> Rodando osrm-customize...'",
+        "sudo docker run --rm -v $(pwd):/data ghcr.io/project-osrm/osrm-backend:v5.27.1 "
+        "osrm-customize /data/sao_paulo.osrm",
+        "echo '>>> Pré-processamento OSRM concluído'",
+        # Sobe os arquivos .osrm para S3 (exclui pkl e osm — só artefatos do OSRM)
+        f"aws s3 sync . s3://{graph_bucket}/osrm/processed/ --region {region} "
+        "--exclude '*.osm' --exclude '*.pkl' --exclude 'pkl_to_osm.py'",
+        "echo '>>> Upload para S3 concluído'",
+    ]
+
+    ssm = boto3.client("ssm", region_name=region)
+
+    print(f"  Enviando script de pré-processamento para EC2 ({instance_id}) via SSM...")
+    response = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName="AWS-RunShellScript",
+        Parameters={"commands": commands},
+    )
+    cmd_id = response["Command"]["CommandId"]
+    print(f"  SSM Command iniciado (ID: {cmd_id}). Aguardando (~8-12 min)...")
+
+    while True:
+        time.sleep(20)
+        print(".", end="", flush=True)
+        try:
+            inv = ssm.get_command_invocation(CommandId=cmd_id, InstanceId=instance_id)
+            status = inv["Status"]
+            if status not in ("Pending", "InProgress", "Delayed"):
+                print(f"\n  SSM concluído com status: {status}")
+                if status != "Success":
+                    print(f"Stdout:\n{inv.get('StandardOutputContent')}")
+                    print(f"Stderr:\n{inv.get('StandardErrorContent')}")
+                    raise RuntimeError(f"Pré-processamento OSRM falhou com status: {status}")
+                break
+        except ssm.exceptions.InvocationDoesNotExist:
+            continue
+
+    print(f"  Arquivos OSRM disponíveis em s3://{graph_bucket}/osrm/processed/")
+
+
 def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
     print("\n=== Novo deployment ECS (todas as services) ===")
     region = outputs["aws_region"]["value"]
@@ -454,6 +556,11 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
 
     #Empacota e envia o código de treino (SageMaker) + catálogo semântico ao S3
     stage_upload_ml_assets(outputs)
+
+    # Pré-processa o grafo de SP com OSRM na EC2 e salva os artefatos no S3.
+    # Feito ANTES do build/push para que os containers ECS já encontrem os
+    # arquivos .osrm disponíveis no S3 ao subir pela primeira vez.
+    stage_build_osrm_data(outputs)
 
     #Roda os comandos docker (docker login, docker build e docker push pra cada imagem)
     stage_build_push(outputs)
