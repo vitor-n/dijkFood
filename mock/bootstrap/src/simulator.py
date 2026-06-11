@@ -29,7 +29,7 @@ from utils import get_random_sp_coordinate
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("simulator")
@@ -472,6 +472,7 @@ async def order_emitter(client, users, restaurants, config, weights=None):
         tasks.discard(task)
         metrics.max_simultaneous_orders = max(metrics.max_simultaneous_orders, len(tasks))
         log.info(f"Pedidos em andamento restantes: {len(tasks)}")
+        print(f"Pedidos em andamento restantes: {len(tasks)}")
 
     while time.perf_counter() < end_time:
         t_start = time.perf_counter()
