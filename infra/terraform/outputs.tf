@@ -92,8 +92,9 @@ output "prediction_service_name" {
   value = module.prediction_service.service_name
 }
 
-output "assistant_service_name" {
-  value = module.assistant_service.service_name
+output "assistant_instance_id" {
+  description = "ID da EC2 que hospeda o assistente"
+  value       = module.assistant_ec2.instance_id
 }
 
 output "dashboard_url" {

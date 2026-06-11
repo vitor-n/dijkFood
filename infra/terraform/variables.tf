@@ -108,19 +108,19 @@ variable "routing_memory" {
 variable "routing_desired" {
   description = "Desired task count for routing-service"
   type        = number
-  default     = 6
+  default     = 1
 }
 
 variable "routing_min" {
   description = "Min task count for routing-service auto-scaling"
   type        = number
-  default     = 6
+  default     = 1
 }
 
 variable "routing_max" {
   description = "Max task count for routing-service auto-scaling"
   type        = number
-  default     = 60
+  default     = 10
 }
 
 variable "tracking_cpu" {
@@ -150,7 +150,7 @@ variable "tracking_min" {
 variable "tracking_max" {
   description = "Max task count for tracking-service auto-scaling"
   type        = number
-  default     = 60
+  default     = 30
 }
 
 variable "order_cpu" {
@@ -180,7 +180,7 @@ variable "order_min" {
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 60
+  default     = 30
 }
 
 # ---------- Camada analítica / Objetivo 3 ----------
@@ -235,25 +235,10 @@ variable "prediction_max" {
   default = 4
 }
 
-variable "assistant_cpu" {
-  type    = number
-  default = 1024
-}
-variable "assistant_memory" {
-  type    = number
-  default = 2048
-}
-variable "assistant_desired" {
-  type    = number
-  default = 1
-}
-variable "assistant_min" {
-  type    = number
-  default = 1
-}
-variable "assistant_max" {
-  type    = number
-  default = 4
+variable "assistant_instance_type" {
+  description = "Tipo da EC2 que hospeda o assistente"
+  type        = string
+  default     = "t3.micro"
 }
 
 # ---------- Camada conversacional (Bedrock) ----------

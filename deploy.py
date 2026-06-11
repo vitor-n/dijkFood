@@ -364,7 +364,6 @@ def stage_force_ecs_deploy(outputs: dict[str, Any]) -> None:
         "tracking_service_name",
         "order_service_name",
         "prediction_service_name",
-        "assistant_service_name",
     ]
     
     for svc_key in services_to_deploy:
@@ -411,6 +410,27 @@ def stage_refresh_dashboard_ec2(outputs: dict[str, Any]) -> None:
         print(f"  [dashboard] refresh solicitado na EC2 ({instance_id}). URL: {url}")
     except Exception as exc:  # noqa: BLE001
         print(f"  [dashboard] falha ao solicitar refresh (a EC2 se auto-atualiza via user-data): {exc}")
+
+def stage_refresh_assistant_ec2(outputs: dict[str, Any]) -> None:
+    """Força a EC2 do assistant a (re)puxar a imagem recém-publicada via SSM."""
+    instance_id = outputs.get("assistant_instance_id", {}).get("value")
+    if not instance_id:
+        print("  [assistant] instance_id ausente — pulando refresh do assistant.")
+        return
+    region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    ssm = boto3.client("ssm", region_name=region)
+    try:
+        ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [
+                "for i in $(seq 1 20); do [ -x /usr/local/bin/run-assistant.sh ] && break; sleep 5; done",
+                "/usr/local/bin/run-assistant.sh || true",
+            ]},
+        )
+        print(f"  [assistant] refresh solicitado na EC2 ({instance_id}).")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [assistant] falha ao solicitar refresh: {exc}")
 
 
 def stage_smoke_test(outputs: dict[str, Any]) -> None:
@@ -596,6 +616,7 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
 
     #atualiza o container do dashboard na EC2 dedicada (imagem recém-publicada)
     stage_refresh_dashboard_ec2(outputs)
+    stage_refresh_assistant_ec2(outputs)
 
     #Faz um check básico da saúde dos serviços
     stage_smoke_test(outputs)
@@ -742,6 +763,7 @@ def main() -> None:
         stage_build_push(out)
         stage_force_ecs_deploy(out)
         stage_refresh_dashboard_ec2(out)
+        stage_refresh_assistant_ec2(out)
         return
 
     if action == "deploy":

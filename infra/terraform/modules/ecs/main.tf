@@ -160,7 +160,7 @@ resource "aws_ecs_task_definition" "routing" {
       portMappings = [{ containerPort = 8001, protocol = "tcp" }]
 
       environment = [
-        { name = "OSRM_URL",           value = "http://localhost:5000" },
+        { name = "OSRM_URL", value = "http://localhost:5000" },
         { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       ]
 

@@ -369,40 +369,27 @@ module "prediction_service" {
   path_patterns          = ["/predict", "/predict/*", "/train/*", "/batch/*", "/model/*"]
 }
 
-module "assistant_service" {
-  source = "./modules/app-service"
+module "assistant_ec2" {
+  source = "./modules/assistant-ec2"
 
-  project_name = var.project_name
-  name         = "assistant-service"
-  aws_region   = var.aws_region
-  image        = module.ecr.repository_urls["assistant-service"]
+  project_name  = var.project_name
+  aws_region    = var.aws_region
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
+  instance_type = var.assistant_instance_type
+  image         = module.ecr.repository_urls["assistant-service"]
 
-  container_port = 8006
-  cpu            = var.assistant_cpu
-  memory         = var.assistant_memory
-  desired_count  = var.assistant_desired
-  min_count      = var.assistant_min
-  max_count      = var.assistant_max
+  glue_database    = module.datalake.glue_database_name
+  athena_workgroup = module.datalake.athena_workgroup_name
+  datalake_bucket  = module.datalake.datalake_bucket_name
 
-  environment = concat(local.analytics_env, [
-    { name = "USE_BEDROCK", value = tostring(var.assistant_use_bedrock) },
-    { name = "BEDROCK_REGION", value = var.bedrock_region },
-    { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
-    { name = "BEDROCK_AWS_ACCESS_KEY_ID", value = var.bedrock_aws_access_key_id },
-    { name = "BEDROCK_AWS_SECRET_ACCESS_KEY", value = var.bedrock_aws_secret_access_key },
-  ])
+  use_bedrock        = var.assistant_use_bedrock
+  bedrock_region     = var.bedrock_region
+  bedrock_model_id   = var.bedrock_model_id
+  bedrock_access_key = var.bedrock_aws_access_key_id
+  bedrock_secret_key = var.bedrock_aws_secret_access_key
 
-  cluster_id            = module.ecs.cluster_id
-  cluster_name          = module.ecs.cluster_name
-  execution_role_arn    = data.aws_iam_role.lab_role.arn
-  task_role_arn         = data.aws_iam_role.lab_role.arn
-  private_subnet_ids    = module.networking.private_subnet_ids
-  ecs_security_group_id = aws_security_group.ecs_tasks.id
-  vpc_id                = module.networking.vpc_id
-
-  listener_arn           = module.alb.http_listener_arn
-  listener_rule_priority = 150
-  path_patterns          = ["/chat", "/chat/*"]
+  listener_arn = module.alb.http_listener_arn
 }
 
 # ──────────────────────────────────────────────

@@ -44,11 +44,7 @@ prediction_desired = 1
 prediction_min     = 1
 prediction_max     = 1
 
-assistant_cpu     = 512
-assistant_memory  = 1024
-assistant_desired = 1
-assistant_min     = 1
-assistant_max     = 2
+assistant_instance_type = "t3.micro"
 
 dashboard_instance_type   = "t3.small"
 load_tester_instance_type = "t3.large"
