@@ -280,7 +280,7 @@ def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
         # Instala dependências
         "sudo dnf install -y python3-pip docker",
         "sudo systemctl start docker",
-        "pip3 install networkx boto3 --quiet",
+        "pip3 install networkx boto3 numpy shapely --quiet",
         # Cria diretório de trabalho isolado
         "rm -rf osrm_build && mkdir -p osrm_build && cd osrm_build",
         # Baixa pkl e script do S3
@@ -311,6 +311,18 @@ def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
     ssm = boto3.client("ssm", region_name=region)
 
     print(f"  Enviando script de pré-processamento para EC2 ({instance_id}) via SSM...")
+    print(f"Aguardando instância {instance_id} ficar Online no SSM...")
+    while True:
+        try:
+            info = ssm.describe_instance_information(InstanceInformationFilterList=[{'key': 'InstanceIds', 'valueSet': [instance_id]}])
+            if info.get('InstanceInformationList') and info['InstanceInformationList'][0]['PingStatus'] == 'Online':
+                break
+        except Exception:
+            pass
+        time.sleep(5)
+        print(".", end="", flush=True)
+    print(" Instância pronta!")
+
     response = ssm.send_command(
         InstanceIds=[instance_id],
         DocumentName="AWS-RunShellScript",
@@ -328,8 +340,10 @@ def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
             if status not in ("Pending", "InProgress", "Delayed"):
                 print(f"\n  SSM concluído com status: {status}")
                 if status != "Success":
-                    print(f"Stdout:\n{inv.get('StandardOutputContent')}")
-                    print(f"Stderr:\n{inv.get('StandardErrorContent')}")
+                    stdout = inv.get('StandardOutputContent', '')
+                    stderr = inv.get('StandardErrorContent', '')
+                    print(f"Stdout:\n{stdout.encode('cp1252', errors='replace').decode('cp1252')}")
+                    print(f"Stderr:\n{stderr.encode('cp1252', errors='replace').decode('cp1252')}")
                     raise RuntimeError(f"Pré-processamento OSRM falhou com status: {status}")
                 break
         except ssm.exceptions.InvocationDoesNotExist:
@@ -508,6 +522,18 @@ def stage_rds_init_via_ssm(outputs: dict[str, Any], db_user: str, db_password: s
     aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
     ssm_client = boto3.client("ssm", region_name=aws_region)
     
+    print(f"Aguardando instância {instance_id} ficar Online no SSM...")
+    while True:
+        try:
+            info = ssm_client.describe_instance_information(InstanceInformationFilterList=[{'key': 'InstanceIds', 'valueSet': [instance_id]}])
+            if info.get('InstanceInformationList') and info['InstanceInformationList'][0]['PingStatus'] == 'Online':
+                break
+        except Exception:
+            pass
+        time.sleep(5)
+        print(".", end="", flush=True)
+    print(" Instância pronta!")
+
     try:
         response = ssm_client.send_command(
             InstanceIds=[instance_id],

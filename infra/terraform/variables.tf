@@ -58,7 +58,7 @@ variable "db_multi_az" {
 variable "load_tester_instance_type" {
   description = "EC2 instance type to load testing"
   type        = string
-  default     = "t3.small"
+  default     = "t3.large"
 }
 
 # ---------- ECS ----------

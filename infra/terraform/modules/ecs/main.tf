@@ -119,7 +119,7 @@ resource "aws_ecs_task_definition" "routing" {
       image      = "ghcr.io/project-osrm/osrm-backend:v5.27.1"
       entryPoint = ["/bin/sh", "-c"]
       command = [
-        "apt-get update -qq && apt-get install -y -qq awscli && mkdir -p /data && aws s3 sync s3://${var.graph_bucket_name}/osrm/processed/ /data/ && echo 'Download OSRM concluido' && osrm-routed --algorithm MLD /data/sao_paulo.osrm --port 5000 --max-table-size 10000"
+        "apt-get update -qq && apt-get install -y -qq awscli curl && mkdir -p /data && aws s3 sync s3://${var.graph_bucket_name}/osrm/processed/ /data/ && echo 'Download OSRM concluido' && osrm-routed --algorithm MLD /data/sao_paulo.osrm --port 5000 --max-table-size 10000"
       ]
 
       environment = [

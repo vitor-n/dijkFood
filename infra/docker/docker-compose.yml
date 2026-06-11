@@ -132,12 +132,6 @@ services:
       - ../../services/routing-service/data:/data:ro
     ports:
       - "5000:5000"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf 'http://localhost:5000/route/v1/driving/-46.6388,-23.5489;-46.6588,-23.5689?overview=false' | grep -q '\"code\":\"Ok\"' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
     networks:
       - dijkfood
 
@@ -151,8 +145,7 @@ services:
     ports:
       - "8001:8001"
     depends_on:
-      osrm-backend:
-        condition: service_healthy
+      - osrm-backend
     networks:
       - dijkfood
 
