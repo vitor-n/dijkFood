@@ -22,14 +22,14 @@ core_api_max     = 4
 
 tracking_cpu     = 512
 tracking_memory  = 1024
-tracking_desired = 1
-tracking_min     = 1
+tracking_desired = 4
+tracking_min     = 4
 tracking_max     = 12
 
 order_cpu     = 512
 order_memory  = 1024
-order_desired = 1
-order_min     = 1
+order_desired = 2
+order_min     = 2
 order_max     = 8
 
 routing_cpu     = 2048
@@ -51,7 +51,7 @@ assistant_min     = 1
 assistant_max     = 2
 
 dashboard_instance_type   = "t3.small"
-load_tester_instance_type = "t3.medium"
+load_tester_instance_type = "t3.large"
 
 db_username = "dijkfoodadmin"
 db_password = "12345678"

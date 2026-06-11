@@ -37,12 +37,11 @@ async def lifespan(app: FastAPI):
 
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
         app.state.dynamodb = dynamo_resource
+        app.state.table = await dynamo_resource.Table(settings.DYNAMO_TABLE)
         yield
 
 async def get_courier_repo(request: Request):
-    db = request.app.state.dynamodb
-    table = await db.Table(settings.DYNAMO_TABLE)
-    return CourierRepository(table)
+    return CourierRepository(request.app.state.table)
 
 
 app = FastAPI(title="DijkFood Tracking Service", lifespan = lifespan)

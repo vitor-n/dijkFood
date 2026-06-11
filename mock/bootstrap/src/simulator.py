@@ -65,7 +65,7 @@ SILENT = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
 class SimConfig:
     scenario: str = os.getenv("SCENARIO", "testing")
     orders_per_second: float = 0.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 30))
+    duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
     position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
     delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 5.0))
     delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 10.0))

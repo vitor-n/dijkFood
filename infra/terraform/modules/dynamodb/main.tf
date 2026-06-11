@@ -1,11 +1,8 @@
 resource "aws_dynamodb_table" "courier_positions" {
   name         = "CourierTracking"
-  billing_mode = "PROVISIONED"
+  billing_mode = "PAY_PER_REQUEST"
 
   hash_key = "ID_courier"
-
-  read_capacity  = 30
-  write_capacity = 300
 
   # CDC para a camada analítica: posições reportadas viram eventos no Firehose
   # através da Lambda position-forwarder (sem impactar a latência da operação).
@@ -28,8 +25,6 @@ resource "aws_dynamodb_table" "courier_positions" {
     range_key          = "ID_courier"
     projection_type    = "INCLUDE"
     non_key_attributes = ["status", "lat", "lon", "updated_at"]
-    read_capacity      = 30
-    write_capacity     = 300
   }
 
   point_in_time_recovery {
