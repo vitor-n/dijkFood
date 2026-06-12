@@ -633,11 +633,20 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
 
     main_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "main.py")
     simulator_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "simulator.py")
+    config_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "config.py")
+    metrics_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "metrics.py")
+    lifecycle_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "lifecycle.py")
     utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
 
     with open(simulator_path, "r", encoding="utf-8") as f:
         simulator_content = f.read()
+    with open(config_path, "r", encoding="utf-8") as f:
+        config_content = f.read()
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        metrics_content = f.read()
+    with open(lifecycle_path, "r", encoding="utf-8") as f:
+        lifecycle_content = f.read()
     with open(main_path, "r", encoding="utf-8") as f:
         main_content = f.read()
     with open(utils_path, "r", encoding="utf-8") as f:
@@ -665,6 +674,15 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "cat << \"EOF_MAIN\" > main.py",
         main_content,
         "EOF_MAIN",
+        "cat << \"EOF_CONFIG\" > config.py",
+        config_content,
+        "EOF_CONFIG",
+        "cat << \"EOF_METRICS\" > metrics.py",
+        metrics_content,
+        "EOF_METRICS",
+        "cat << \"EOF_LIFECYCLE\" > lifecycle.py",
+        lifecycle_content,
+        "EOF_LIFECYCLE",
         "cat << \"EOF_SIM\" > simulator.py",
         simulator_content,
         "EOF_SIM",

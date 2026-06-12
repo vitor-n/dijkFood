@@ -11,20 +11,21 @@ _fake_utils.get_random_sp_coordinate = lambda *a, **k: (-23.55, -46.63)
 sys.modules["utils"] = _fake_utils
 
 import simulator as S  # noqa: E402
+import config as C  # noqa: E402
 
 
 def test_scenario_presets():
-    cfg = S.SimConfig(scenario="hotspot")
+    cfg = C.SimConfig(scenario="hotspot")
     assert cfg.orders_per_second == 50.0 and cfg.hotspot_weight > 0
-    cfg = S.SimConfig(scenario="concentration")
+    cfg = C.SimConfig(scenario="concentration")
     assert cfg.restaurant_concentration > 0
-    cfg = S.SimConfig(scenario="outage")
+    cfg = C.SimConfig(scenario="outage")
     assert cfg.courier_outage_pct > 0
 
 
 def test_hotspot_weighting():
     meta = [{"id": i, "h3": 100 if i < 3 else 200} for i in range(10)]
-    cfg = S.SimConfig()
+    cfg = C.SimConfig()
     cfg.hotspot_region = "100"
     cfg.hotspot_weight = 0.7
     cfg.restaurant_concentration = 0.0
@@ -36,7 +37,7 @@ def test_hotspot_weighting():
 
 def test_concentration_weighting():
     meta = [{"id": i, "h3": None} for i in range(20)]
-    cfg = S.SimConfig()
+    cfg = C.SimConfig()
     cfg.hotspot_region = ""
     cfg.restaurant_concentration = 0.8
     cfg.hot_restaurant_count = 4
