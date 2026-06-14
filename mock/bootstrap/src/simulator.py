@@ -60,7 +60,24 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
         else:
             break
 
-    return users, rests, rests_meta
+    page = 1
+    items_by_rest = {}
+    while page <= MAX_PAGES:
+        i_body = await _request(client, "GET", CRUD_URL, f"/items?page={page}&itemsPerPage=500", sem, config)
+        if i_body:
+            for i in i_body.get("data", []):
+                r_id = i["id_restaurant"]
+                if r_id not in items_by_rest:
+                    items_by_rest[r_id] = []
+                items_by_rest[r_id].append({"id_item": i["id_item"]})
+            if i_body.get('has_more', False):
+                page += 1
+            else:
+                break
+        else:
+            break
+
+    return users, rests, rests_meta, items_by_rest
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +159,7 @@ async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore
     log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
              f"({config.courier_outage_pct:.0%})")
 
-async def order_emitter(client, users, restaurants, config, weights=None):
+async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
@@ -169,7 +186,10 @@ async def order_emitter(client, users, restaurants, config, weights=None):
         else:
             r_id = random.choice(restaurants)
 
-        task = asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config))
+        task = asyncio.create_task(run_order_lifecycle(
+            client, sem, u_id, r_id, config,
+            items_menu=items_by_rest.get(r_id, []) if items_by_rest else []
+        ))
         tasks.add(task)
         task.add_done_callback(_on_order_done)
 
@@ -193,7 +213,7 @@ async def main():
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
         sem_init = asyncio.Semaphore(10)
-        users, restaurants, rests_meta = await fetch_existing_ids(client, sem_init, config)
+        users, restaurants, rests_meta, items_by_rest = await fetch_existing_ids(client, sem_init, config)
 
         if not users or not restaurants:
             log.error("Banco vazio! Rode o populate.py antes.")
@@ -205,7 +225,7 @@ async def main():
         population, weights = build_restaurant_population(rests_meta, config)
         await apply_courier_outage(client, sem_init, config)
 
-        await order_emitter(client, users, population or restaurants, config, weights=weights)
+        await order_emitter(client, users, population or restaurants, config, weights=weights, items_by_rest=items_by_rest)
 
     total_duration = time.perf_counter() - sim_start
     metrics.report(config, total_duration)

@@ -48,12 +48,25 @@ class OrderEvent(Base):
     ID_state   = Column("id_state", Integer, nullable=False)
 
 
+class OrderItem(Base):
+    __tablename__ = "orderitems"
+
+    ID_order_item = Column("id_order_item", Integer, primary_key=True, autoincrement=True)
+    price         = Column(Numeric(100, 2), nullable=False)
+    ID_item       = Column("id_item", Integer, nullable=False)
+    ID_order      = Column("id_order", Integer, nullable=False)
+
+
 # --- Pydantic schemas ---
+
+class OrderItemRequest(BaseModel):
+    id_item: int
+    price: float
 
 class OrderCreationRequest(BaseModel):
     id_restaurant: int
     id_user: int
-    #TODO: add items: list[int]
+    items: list[OrderItemRequest] = []
 
 class OrderCreationResponse(BaseModel):
     id_order: int

@@ -40,6 +40,7 @@ class Order(Base):
     # Relacionamentos para eager-loading conveniente
     last_state_rel = relationship("OrderState", foreign_keys=[id_last_state])
     events = relationship("OrderEvent", back_populates="order", order_by="OrderEvent.changed_at")
+    order_items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
 
 class OrderEvent(Base):
@@ -58,3 +59,14 @@ class Item(Base):
     id_item = Column("id_item", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
     id_restaurant = Column("id_restaurant", Integer, ForeignKey("restaurants.id_restaurant"), nullable=False)
+
+
+class OrderItem(Base):
+    __tablename__ = "orderitems"
+    id_order_item = Column("id_order_item", Integer, primary_key=True)
+    price = Column(Numeric(100, 2), nullable=False)
+    id_item = Column("id_item", Integer, ForeignKey("items.id_item"), nullable=False)
+    id_order = Column("id_order", Integer, ForeignKey("orders.id_order"), nullable=False)
+
+    order = relationship("Order", back_populates="order_items")
+    item = relationship("Item")

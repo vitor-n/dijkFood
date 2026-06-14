@@ -124,6 +124,15 @@ def main():
         FROM events WHERE entidade='Position' AND dados.id_courier IS NOT NULL
     """)
 
+    materialize("curated_order_items", "curated", """
+        SELECT dados.id_order AS id_order, 
+               CAST(item.id_item AS INTEGER) AS id_item, 
+               CAST(item.price AS DOUBLE) AS price
+        FROM events
+        CROSS JOIN UNNEST(dados.items) AS t(item)
+        WHERE entidade='Order' AND acao='CREATE' AND dados.items IS NOT NULL
+    """)
+
     # ── MARTS (agregados prontos, Parquet) — reutilizam as curated ──
     materialize("mart_daily_volume", "marts",
                 "SELECT date(created_at) AS day, count(*) AS orders FROM curated_orders GROUP BY 1")

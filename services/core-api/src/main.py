@@ -16,7 +16,8 @@ from .models import (User, UserSchema,
                    Courier, CourierGeneralSchema, CourierCreationSchema,
                    async_session)
 from .routers import router as extra_router
-from .new_models import OutboxEvent
+from .new_models import OutboxEvent, OrderItem, Item
+from .schemas import OrderItemSchema, ItemSchema
 
 from .config import settings
 
@@ -220,6 +221,29 @@ app.include_router(crud_router(
     path = "/couriers",
     tags = ["Couriers"],
     included_methods = ["read", "read_multi", "update"]
+))
+
+# Endpoints CRUD para itens de pedido (OrderItems)
+app.include_router(crud_router(
+    session = get_session,
+    model = OrderItem,
+    create_schema = OrderItemSchema,
+    update_schema = OrderItemSchema,
+    select_schema = OrderItemSchema,
+    path = "/order_items",
+    tags = ["Order Items"]
+))
+
+# Endpoints CRUD global para itens de cardápio (Menu Items)
+app.include_router(crud_router(
+    session = get_session,
+    model = Item,
+    create_schema = ItemSchema,
+    update_schema = ItemSchema,
+    select_schema = ItemSchema,
+    path = "/items",
+    tags = ["Items"],
+    included_methods=["read", "read_multi"] # Não expor create/delete/update se não for necessário
 ))
 
 # Rotas adicionais: histórico de pedidos + menu de restaurantes

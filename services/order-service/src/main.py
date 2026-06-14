@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from datetime import datetime
 from urllib.parse import urljoin
 
-from .models import (Order, OrderEvent, Restaurant, OutboxEvent,
+from .models import (Order, OrderEvent, Restaurant, OutboxEvent, OrderItem,
                      OrderCreationRequest, OrderCreationResponse,
                      OrderUpdateRequest, OrderUpdateResponse)
 from .config import settings
@@ -183,6 +183,20 @@ async def create_order(
         # ETA já estava sendo computada em paralelo.
         eta = await _resolve_eta(eta_task)
 
+        items_payload = []
+        if req.items:
+            for item_req in req.items:
+                new_item = OrderItem(
+                    price=item_req.price,
+                    ID_item=item_req.id_item,
+                    ID_order=new_order.ID_order,
+                )
+                db.add(new_item)
+                items_payload.append({
+                    "id_item": item_req.id_item,
+                    "price": float(item_req.price)
+                })
+
         order_data = {
             "id_order": new_order.ID_order,
             "created_at": new_order.created_at.isoformat(),
@@ -192,6 +206,7 @@ async def create_order(
             "id_last_state": new_order.ID_last_state,
             "predicted_eta_minutes": eta["eta_minutes"],
             "eta_source": eta["source"],
+            "items": items_payload,
         }
         # Outbox transacional: o evento analítico é gravado na MESMA transação do pedido.
         db.add(OutboxEvent(entidade="Order", acao="CREATE", dados=order_data))

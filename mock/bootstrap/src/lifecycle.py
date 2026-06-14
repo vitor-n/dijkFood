@@ -25,8 +25,14 @@ async def _request(
                 resp = await client.request(method, url, **kwargs)
                 latency = (time.perf_counter() - t0) * 1000
                 
+                import re
+                from urllib.parse import urlparse
+                # Remove query strings e agrupa IDs numéricos (ex: /items?page=1 -> /items, /users/123 -> /users/{id})
+                base_path = urlparse(path).path
+                metric_path = re.sub(r'/\d+', '/{id}', base_path)
+                
                 # Registra latência apenas de requisições concluídas
-                metrics.record_latency(path, method, latency, resp.status_code)
+                metrics.record_latency(metric_path, method, latency, resp.status_code)
                 
                 if resp.status_code in (200, 201):
                     try: return resp.json()
@@ -58,9 +64,18 @@ async def fetch_route(client, sem, config, orig_lat, orig_lon, dest_lat, dest_lo
 # Ciclo de Vida do Pedido
 # ---------------------------------------------------------------------------
 
-async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore, user_id: int, restaurant_id: int, config: SimConfig):
+async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore, user_id: int, restaurant_id: int, config: SimConfig, items_menu: list = None):
     # 1. Criação
-    body = await _request(client, "POST", ORDER_URL, "/order", sem, config, json={"id_user": user_id, "id_restaurant": restaurant_id})
+    payload = {"id_user": user_id, "id_restaurant": restaurant_id}
+    if items_menu:
+        num_items = random.randint(1, min(5, len(items_menu)))
+        chosen = random.choices(items_menu, k=num_items)
+        payload["items"] = [
+            {"id_item": item["id_item"], "price": round(random.uniform(10, 100), 2)}
+            for item in chosen
+        ]
+
+    body = await _request(client, "POST", ORDER_URL, "/order", sem, config, json=payload)
     if not body or "id_order" not in body:
         metrics.orders_not_created += 1
         log.warning(f"Falha ao criar pedido para usuário {user_id} e restaurante {restaurant_id}.")

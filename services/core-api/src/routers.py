@@ -11,13 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from .models import async_session, Restaurant
-from .new_models import Order, OrderEvent, Item, OutboxEvent
+from .new_models import Order, OrderEvent, Item, OutboxEvent, OrderItem
 from .schemas import (
     OrderSummarySchema,
     OrderHistorySchema,
     OrderEventSchema,
     ItemCreateSchema,
     ItemResponseSchema,
+    OrderItemResponseSchema,
 )
 
 router = APIRouter()
@@ -88,6 +89,7 @@ async def get_order_history(
         .options(
             selectinload(Order.last_state_rel),
             selectinload(Order.events).selectinload(OrderEvent.state_rel),
+            selectinload(Order.order_items).selectinload(OrderItem.item),
         )
     )
     order = result.scalar_one_or_none()
@@ -107,6 +109,16 @@ async def get_order_history(
         for e in order.events
     ]
 
+    items = [
+        OrderItemResponseSchema(
+            id_order_item=oi.id_order_item,
+            id_item=oi.id_item,
+            name=oi.item.name if oi.item else "Desconhecido",
+            price=float(oi.price),
+        )
+        for oi in order.order_items
+    ]
+
     return OrderHistorySchema(
         id_order=order.id_order,
         created_at=order.created_at,
@@ -115,6 +127,7 @@ async def get_order_history(
         id_courier=order.id_courier,
         last_state=order.last_state_rel.name,
         events=events,
+        items=items,
     )
 
 

@@ -109,18 +109,17 @@ async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
         return None
     return body.get("id_restaurant") or body.get("id")
 
-# TODO: reimplementar criação de itens de menu quando endpoint estiver pronto
-# async def create_menu_item(
-#     client: httpx.AsyncClient,
-#     sem: asyncio.Semaphore,
-#     restaurant_id: int,
-# ) -> int | None:
-#     body = await post_with_retry(client, f"{BASE_URL}/menu_items", {
-#         "name":          fake.word().capitalize(),
-#         "price":         round(random.uniform(10, 100), 2),
-#         "ID_restaurant": restaurant_id,
-#     }, sem, config_retry, log)
-#     return body.get("id") if body is not None else None
+ITEMS_PER_RESTAURANT = 5
+
+async def create_menu_item(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    restaurant_id: int,
+) -> int | None:
+    body = await post_with_retry(client, f"{BASE_URL}/restaurants/{restaurant_id}/menu", {
+        "name":          fake.word().capitalize(),
+    }, sem, config_retry, log)
+    return body.get("id_item") if body is not None else None
 
 
 async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore):
@@ -196,30 +195,29 @@ async def run_bootstrap() -> dict:
             [create_restaurant(client, sem) for _ in range(NUM_RESTAURANTS)],
         )
 
-        #TODO: reimplementar criação de itens de menu quando endpoint estiver pronto
         # ── Itens de menu ───────────────────────────────────────────────────
-        # item_ids: dict[int, list[int]] = {}
-        # if rest_result.created:
-        #     total_items = len(rest_result.created) * ITEMS_PER_RESTAURANT
-        #     log.info(f"Criando {total_items} itens de menu ({ITEMS_PER_RESTAURANT} por restaurante)")
-        #     item_coros = [
-        #         create_menu_item(client, sem, rid)
-        #         for rid in rest_result.created
-        #         for _ in range(ITEMS_PER_RESTAURANT)
-        #     ]
-        #     # Mapeia item → restaurante para retorno estruturado
-        #     rid_per_coro = [
-        #         rid
-        #         for rid in rest_result.created
-        #         for _ in range(ITEMS_PER_RESTAURANT)
-        #     ]
-        #     item_result = await ingest_batch("menu_items", item_coros)
+        item_ids: dict[int, list[int]] = {}
+        if rest_result.created:
+            total_items = len(rest_result.created) * ITEMS_PER_RESTAURANT
+            log.info(f"Criando {total_items} itens de menu ({ITEMS_PER_RESTAURANT} por restaurante)")
+            item_coros = [
+                create_menu_item(client, sem, rid)
+                for rid in rest_result.created
+                for _ in range(ITEMS_PER_RESTAURANT)
+            ]
+            # Mapeia item → restaurante para retorno estruturado
+            rid_per_coro = [
+                rid
+                for rid in rest_result.created
+                for _ in range(ITEMS_PER_RESTAURANT)
+            ]
+            item_result = await ingest_batch("menu_items", item_coros)
 
-        #     for rid, item_id in zip(rid_per_coro, item_result.created):
-        #         item_ids.setdefault(rid, []).append(item_id)
-        # else:
-        #     log.warning("Nenhum restaurante criado — pulando itens de menu.")
-        #     item_result = BatchResult("menu_items")
+            for rid, item_id in zip(rid_per_coro, item_result.created):
+                item_ids.setdefault(rid, []).append(item_id)
+        else:
+            log.warning("Nenhum restaurante criado — pulando itens de menu.")
+            item_result = BatchResult("menu_items")
 
         # ── Entregadores ────────────────────────────────────────────────────
         log.info(f"Criando {NUM_COURIERS} entregadores")
@@ -239,7 +237,7 @@ async def run_bootstrap() -> dict:
     return {
         "user_ids":       user_result.created,
         "restaurant_ids": rest_result.created,
-        # "item_ids":       item_ids,          # {restaurant_id: [item_id, ...]}
+        "item_ids":       item_ids,          # {restaurant_id: [item_id, ...]}
         "courier_ids":    courier_result.created,
     }
 
