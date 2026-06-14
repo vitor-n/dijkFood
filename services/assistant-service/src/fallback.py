@@ -11,6 +11,22 @@ import re
 
 # (regex, sql, intent)
 _INTENTS: list[tuple[re.Pattern, str, str]] = [
+    (re.compile(r"(faturamento|faturou|receita|ganho).*(restaurante|loja)", re.I),
+     "SELECT r.name AS restaurante, round(sum(oi.price), 2) AS faturamento FROM vw_order_items oi JOIN vw_orders o ON oi.id_order = o.id_order JOIN vw_restaurants r ON o.id_restaurant = r.id_restaurant GROUP BY r.name ORDER BY faturamento DESC LIMIT 10",
+     "faturamento por restaurante"),
+
+    (re.compile(r"(faturamento|receita|ganho).*(total|global)", re.I),
+     "SELECT round(sum(price), 2) AS faturamento_total FROM vw_order_items",
+     "faturamento total"),
+
+    (re.compile(r"(item|itens|prato|pratos|produto|produtos).*(mais vendido|populares|popular|solicitados|solicitado)", re.I),
+     "SELECT i.name AS item, count(*) AS vendas FROM vw_order_items oi JOIN vw_items i ON oi.id_item = i.id_item GROUP BY i.name ORDER BY vendas DESC LIMIT 10",
+     "itens mais vendidos"),
+
+    (re.compile(r"(item|itens|prato|pratos|produto|produtos).*(menos vendido|menos solicitado|menos populares|menos popular)", re.I),
+     "SELECT i.name AS item, count(*) AS vendas FROM vw_order_items oi JOIN vw_items i ON oi.id_item = i.id_item GROUP BY i.name ORDER BY vendas ASC LIMIT 10",
+     "itens menos vendidos"),
+
     (re.compile(r"(quantos|n[uú]mero).*(pedido).*(hora|agora)", re.I),
      "SELECT count(*) AS pedidos_ultima_hora FROM vw_orders WHERE created_at > now() - interval '1' hour",
      "pedidos na última hora"),

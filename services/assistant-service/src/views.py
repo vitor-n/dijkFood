@@ -81,6 +81,23 @@ VIEW_DEFS: list[tuple[str, str]] = [
         ) d ON o.id_order = d.id_order
         LEFT JOIN vw_restaurants r ON o.id_restaurant = r.id_restaurant
     """),
+    ("vw_items", f"""
+        SELECT dados.id_item        AS id_item,
+               dados.name           AS name,
+               dados.id_restaurant  AS id_restaurant
+        FROM events
+        WHERE entidade='MenuItem' AND acao='CREATE' AND dados.id_item IS NOT NULL
+          AND {{p_filter}}
+    """),
+    ("vw_order_items", f"""
+        SELECT dados.id_order               AS id_order,
+               CAST(item.id_item AS INTEGER) AS id_item,
+               CAST(item.price AS DOUBLE)    AS price
+        FROM events
+        CROSS JOIN UNNEST(dados.items) AS t(item)
+        WHERE entidade='Order' AND acao='CREATE' AND dados.items IS NOT NULL
+          AND {{p_filter}}
+    """),
 ]
 
 ALLOWED_TABLES = {"events"} | {name for name, _ in VIEW_DEFS}

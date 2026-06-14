@@ -72,6 +72,18 @@ DEFAULT_SCHEMA = {
                 "status": "AVAILABLE | BUSY | OFFLINE", "reported_at": "quando foi reportada",
             },
         },
+        "vw_items": {
+            "desc": "Itens do cardápio cadastrados.",
+            "columns": {
+                "id_item": "id do item", "name": "nome do item ou prato", "id_restaurant": "id do restaurante",
+            },
+        },
+        "vw_order_items": {
+            "desc": "Tabela de itens comprados em cada pedido, com seus respectivos preços.",
+            "columns": {
+                "id_order": "id do pedido", "id_item": "id do item", "price": "preço do item nesta transação",
+            },
+        },
     },
 }
 
@@ -84,6 +96,10 @@ DEFAULT_DICTIONARY = {
     "em andamento / aberto": "pedido cujo último estado é < 6",
     "hoje": "created_at >= date_trunc('day', now())",
     "última hora": "created_at > now() - interval '1' hour",
+    "item": "prato ou produto em vw_items",
+    "faturamento": "soma de price em vw_order_items",
+    "receita": "soma de price em vw_order_items",
+    "mais vendido": "contagem de vendas por item (JOIN vw_order_items com vw_items)",
 }
 
 DEFAULT_FEW_SHOTS = [
@@ -128,6 +144,27 @@ DEFAULT_FEW_SHOTS = [
             "SELECT r.region, count(*) AS pedidos FROM vw_orders o "
             "JOIN vw_restaurants r ON o.id_restaurant=r.id_restaurant "
             "GROUP BY r.region ORDER BY pedidos DESC LIMIT 20"
+        ),
+    },
+    {
+        "q": "Qual o faturamento total da operação?",
+        "sql": "SELECT round(sum(price), 2) AS faturamento_total FROM vw_order_items",
+    },
+    {
+        "q": "Qual o prato ou item mais vendido?",
+        "sql": (
+            "SELECT i.name, count(*) AS total_vendido FROM vw_order_items oi "
+            "JOIN vw_items i ON oi.id_item = i.id_item "
+            "GROUP BY i.name ORDER BY total_vendido DESC LIMIT 5"
+        ),
+    },
+    {
+        "q": "Qual o faturamento por restaurante?",
+        "sql": (
+            "SELECT r.name, round(sum(oi.price), 2) AS faturamento FROM vw_order_items oi "
+            "JOIN vw_orders o ON oi.id_order = o.id_order "
+            "JOIN vw_restaurants r ON o.id_restaurant = r.id_restaurant "
+            "GROUP BY r.name ORDER BY faturamento DESC LIMIT 10"
         ),
     },
 ]
