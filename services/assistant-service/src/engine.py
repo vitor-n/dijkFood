@@ -14,8 +14,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from . import athena, fallback, nl2sql, sql_guard
+from .athena import AthenaError
 from .config import settings
+from .sql_guard import UnsafeSQL
 
 log = logging.getLogger("assistant.engine")
 
@@ -64,6 +68,7 @@ def answer(question: str) -> dict[str, Any]:
     intent: str | None = None
     sql: str | None = None
     error: str | None = None
+    fallback_reason: str | None = None
 
     # 1) Tenta Bedrock
     if settings.USE_BEDROCK:
@@ -73,10 +78,20 @@ def answer(question: str) -> dict[str, Any]:
             rows = athena.execute(sql)
             source = "bedrock"
             nl = nl2sql.summarize(question, sql, rows) or _template_answer(rows, None)
-            return _result(nl, sql, source, rows, intent, None)
+            return _result(nl, sql, source, rows, intent, None, None)
+        except (BotoCoreError, ClientError) as exc:
+            log.info("caminho Bedrock indisponível (%s) — usando fallback", exc)
+            error = str(exc)
+            fallback_reason = "api_error"
+        except (UnsafeSQL, AthenaError) as exc:
+            log.info("caminho Bedrock não compreendeu (%s) — usando fallback", exc)
+            log.warning("SQL gerado que falhou: %s", raw if 'raw' in locals() else "N/A")
+            error = str(exc)
+            fallback_reason = "unanswered"
         except Exception as exc:  # noqa: BLE001
             log.info("caminho Bedrock falhou (%s) — usando fallback", exc)
             error = str(exc)
+            fallback_reason = "unknown"
 
     # 2) Fallback determinístico
     try:
@@ -84,17 +99,17 @@ def answer(question: str) -> dict[str, Any]:
         sql = sql_guard.sanitize(fb_sql)
         rows = athena.execute(sql)
         nl = _template_answer(rows, intent)
-        return _result(nl, sql, source, rows, intent, error)
+        return _result(nl, sql, source, rows, intent, error, fallback_reason)
     except Exception as exc:  # noqa: BLE001
         log.warning("fallback também falhou: %s", exc)
         return _result(
             "Não consegui consultar a camada analítica agora. "
             "Verifique se há eventos no lake e se o Athena/Glue está provisionado.",
-            sql, source, [], intent, str(exc),
+            sql, source, [], intent, str(exc), fallback_reason
         )
 
 
-def _result(nl, sql, source, rows, intent, error):
+def _result(nl, sql, source, rows, intent, error, fallback_reason=None):
     return {
         "answer": nl,
         "sql": sql,
@@ -105,4 +120,5 @@ def _result(nl, sql, source, rows, intent, error):
         "columns": list(rows[0].keys()) if rows else [],
         "chart": _suggest_chart(rows),
         "error": error,
+        "fallback_reason": fallback_reason,
     }

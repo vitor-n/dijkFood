@@ -13,6 +13,10 @@ aws ecr get-login-password --region "$REGION" | docker login --username AWS --pa
 docker pull "$IMAGE"
 docker rm -f assistant 2>/dev/null || true
 docker run -d --name assistant --restart unless-stopped -p 8006:8006 \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="/ec2/dijkfood-assistant" \
+  --log-opt awslogs-create-group=true \
   -e AWS_REGION="$REGION" -e AWS_DEFAULT_REGION="$REGION" \
   -e GLUE_DATABASE="${glue_db}" \
   -e ATHENA_WORKGROUP="${athena_wg}" \

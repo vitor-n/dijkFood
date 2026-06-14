@@ -87,7 +87,7 @@ VIEW_DEFS: list[tuple[str, str]] = [
                dados.id_restaurant  AS id_restaurant
         FROM events
         WHERE entidade='MenuItem' AND acao='CREATE' AND dados.id_item IS NOT NULL
-          AND {{p_filter}}
+          AND {p_filter}
     """),
     ("vw_order_items", f"""
         SELECT dados.id_order               AS id_order,
@@ -96,7 +96,7 @@ VIEW_DEFS: list[tuple[str, str]] = [
         FROM events
         CROSS JOIN UNNEST(dados.items) AS t(item)
         WHERE entidade='Order' AND acao='CREATE' AND dados.items IS NOT NULL
-          AND {{p_filter}}
+          AND {p_filter}
     """),
 ]
 

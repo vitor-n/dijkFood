@@ -429,6 +429,10 @@ def stage_refresh_assistant_ec2(outputs: dict[str, Any]) -> None:
             ]},
         )
         print(f"  [assistant] refresh solicitado na EC2 ({instance_id}).")
+        
+        cw_group_encoded = "/ec2/dijkfood-assistant".replace("/", "$252F")
+        cw_url = f"https://{region}.console.aws.amazon.com/cloudwatch/home?region={region}#logsV2:log-groups/log-group/{cw_group_encoded}"
+        print(f"  [assistant] Logs disponiveis em: {cw_url}")
     except Exception as exc:  # noqa: BLE001
         print(f"  [assistant] falha ao solicitar refresh: {exc}")
 

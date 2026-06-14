@@ -93,7 +93,7 @@ resource "aws_glue_catalog_table" "events" {
     # Campos ausentes para uma dada entidade resolvem para NULL.
     columns {
       name = "dados"
-      type = "struct<id_order:bigint,created_at:string,id_restaurant:bigint,id_user:bigint,id_courier:bigint,id_last_state:int,id_state:int,name:string,email:string,phone:string,lat:double,lon:double,h3_index:bigint,id_cuisine_type:int,id_vehicle_type:int,id_item:bigint,status:string,cell_index:string,updated_at:bigint>"
+      type = "struct<id_order:bigint,created_at:string,id_restaurant:bigint,id_user:bigint,id_courier:bigint,id_last_state:int,id_state:int,name:string,email:string,phone:string,lat:double,lon:double,h3_index:bigint,id_cuisine_type:int,id_vehicle_type:int,id_item:bigint,status:string,cell_index:string,updated_at:bigint,items:array<struct<id_item:string,price:string>>>"
     }
   }
 }

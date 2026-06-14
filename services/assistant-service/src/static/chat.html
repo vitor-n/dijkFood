@@ -112,7 +112,10 @@ function tableHtml(cols, rows){
   return `<table>${head}${body}${more}</table>`;
 }
 function addBot(d){
-  const tag = d.source==="bedrock" ? `<span class="tag">Bedrock</span>` : `<span class="tag fb">Determinístico</span>`;
+  const tag = d.source === "bedrock" ? `<span class="tag">Bedrock</span>` :
+              d.fallback_reason === "api_error" ? `<span class="tag fb">Determinístico (Bedrock indisponível)</span>` :
+              d.fallback_reason === "unanswered" ? `<span class="tag fb">Determinístico (Impossível responder a pergunta)</span>` :
+              `<span class="tag fb">Determinístico</span>`;
   const meta = d.intent ? ` · ${esc(d.intent)}` : "";
   const table = (d.rows && d.rows.length) ? tableHtml(d.columns||[], d.rows) : "";
   const sql = d.sql ? `<details><summary>Ver SQL gerado</summary><pre>${esc(d.sql)}</pre></details>` : "";
