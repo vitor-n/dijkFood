@@ -115,14 +115,16 @@ Se você possui uma conta AWS real com acesso ao Bedrock e quer utilizá-la em c
 
 1. **Crie um IAM User na sua conta real** com permissões para invocar modelos no Bedrock (ex: anexe a política `AmazonBedrockFullAccess`).
 2. **Gere chaves de acesso (Access Key e Secret Key)** para esse usuário.
-3. No arquivo de variáveis do Terraform (`infra/terraform/dev.tfvars`), configure as credenciais da conta real:
-   ```hcl
-   bedrock_aws_access_key_id     = "SUA_ACCESS_KEY_DA_CONTA_REAL"
-   bedrock_aws_secret_access_key = "SUA_SECRET_KEY_DA_CONTA_REAL"
-   bedrock_region                = "us-east-1"                 # Região onde o modelo está ativo
-   bedrock_model_id              = "amazon.nova-micro-v1:0"    # ID do modelo liberado
+3. No seu terminal, exporte as credenciais da conta real como variáveis de ambiente do Terraform:
+   ```bash
+   export TF_VAR_bedrock_aws_access_key_id="SUA_ACCESS_KEY_DA_CONTA_REAL"
+   export TF_VAR_bedrock_aws_secret_access_key="SUA_SECRET_KEY_DA_CONTA_REAL"
+   export TF_VAR_bedrock_region="us-east-1"                 # Região onde o modelo está ativo
+   export TF_VAR_bedrock_model_id="amazon.nova-micro-v1:0"  # ID do modelo liberado
    ```
 4. Execute o deploy (`python deploy.py update` ou `deploy`).
+
+> **⚠️ AVISO DE CUSTOS:** Como os modelos de linguagem são tarifados por token na conta real, **monitore rigorosamente o consumo** no painel de Billing da AWS para não estourar o orçamento do seu grupo (ex: limite de $10 USD). É recomendável configurar o AWS Budgets para receber alertas automáticos de gasto.
 
 *Nota: Esse design mantém as consultas do Athena locais na AWS Academy utilizando a role nativa do contêiner, e redireciona de forma isolada apenas as chamadas do LLM (Bedrock) para a conta real usando as chaves informadas.*
 
