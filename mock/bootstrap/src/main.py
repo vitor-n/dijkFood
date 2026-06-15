@@ -13,6 +13,7 @@ import time
 import httpx
 from dataclasses import dataclass, field
 import sys
+from typing import Optional
 from faker import Faker
 from dotenv import load_dotenv
 from utils import get_random_sp_coordinate, post_with_retry
@@ -115,7 +116,7 @@ async def create_menu_item(
     client: httpx.AsyncClient,
     sem: asyncio.Semaphore,
     restaurant_id: int,
-) -> int | None:
+) -> Optional[int]:
     body = await post_with_retry(client, f"{BASE_URL}/restaurants/{restaurant_id}/menu", {
         "name":          fake.word().capitalize(),
     }, sem, config_retry, log)
