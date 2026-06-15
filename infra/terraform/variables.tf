@@ -66,13 +66,13 @@ variable "load_tester_instance_type" {
 variable "core_api_cpu" {
   description = "CPU units for core-api task (1024 = 1 vCPU)"
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "core_api_memory" {
   description = "Memory (MiB) for core-api task"
   type        = number
-  default     = 4096
+  default     = 2048
 }
 
 variable "core_api_desired" {
@@ -84,25 +84,25 @@ variable "core_api_desired" {
 variable "core_api_min" {
   description = "Min task count for core-api auto-scaling"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "core_api_max" {
   description = "Max task count for core-api auto-scaling"
   type        = number
-  default     = 12
+  default     = 5
 }
 
 variable "routing_cpu" {
   description = "CPU units for routing-service task"
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "routing_memory" {
   description = "Memory (MiB) for routing-service task"
   type        = number
-  default     = 4096
+  default     = 2048
 }
 
 variable "routing_desired" {
@@ -120,67 +120,67 @@ variable "routing_min" {
 variable "routing_max" {
   description = "Max task count for routing-service auto-scaling"
   type        = number
-  default     = 10
+  default     = 8
 }
 
 variable "tracking_cpu" {
   description = "CPU units for tracking-service task"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "tracking_memory" {
   description = "Memory (MiB) for tracking-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "tracking_desired" {
   description = "Desired task count for tracking-service"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "tracking_min" {
   description = "Min task count for tracking-service auto-scaling"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "tracking_max" {
   description = "Max task count for tracking-service auto-scaling"
   type        = number
-  default     = 30
+  default     = 20
 }
 
 variable "order_cpu" {
   description = "CPU units for order-service task"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "order_memory" {
   description = "Memory (MiB) for order-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "order_desired" {
   description = "Desired task count for order-service"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "order_min" {
   description = "Min task count for order-service auto-scaling"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 30
+  default     = 10
 }
 
 # ---------- Camada analítica / Objetivo 3 ----------
