@@ -107,6 +107,9 @@ async def create_order(
         restaurant = (await db.execute(stmt)).scalar_one_or_none()
         if restaurant is None:
             raise HTTPException(status_code=404, detail="Restaurant does not exist")
+            
+        # Libera a conexão com o banco de volta para o pool antes de fazer chamadas de rede
+        await db.commit()
 
         # 2. Busca entregador proximo
         try:

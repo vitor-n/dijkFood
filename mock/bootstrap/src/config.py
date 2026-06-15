@@ -32,6 +32,11 @@ else:
     TRACKING_URL  = BASE_URL
     ROUTE_URL     = BASE_URL
 
+# Amostragem geográfica: se True, usa dados demográficos dos distritos de SP
+USE_DEMOGRAPHIC_SAMPLING = os.getenv(
+    "USE_DEMOGRAPHIC_SAMPLING", "true"
+).lower() in ("true", "1", "yes")
+
 class OrderState(int, Enum):
     CONFIRMED        = 1
     PREPARING        = 2

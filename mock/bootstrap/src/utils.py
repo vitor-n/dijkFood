@@ -9,6 +9,67 @@ from shapely.geometry import Polygon, Point
 URL_POLYGON_SP = "https://servicodados.ibge.gov.br/api/v3/malhas/municipios/3550308?formato=application/json&qualidade=minima"
 FILE_NAME_POLYGON_SP = "polygon_sp.json"
 
+# ---------------------------------------------------------------------------
+# Amostragem demográfica ponderada (GeoSampler)
+# ---------------------------------------------------------------------------
+
+_geo_sampler = None
+_geo_sampler_initialized = False
+
+
+def get_geo_sampler():
+    """Retorna instância singleton do GeoSampler, ou None se indisponível."""
+    global _geo_sampler, _geo_sampler_initialized
+    if not _geo_sampler_initialized:
+        _geo_sampler_initialized = True
+        # Verifica flag de configuração
+        try:
+            from config import USE_DEMOGRAPHIC_SAMPLING
+            if not USE_DEMOGRAPHIC_SAMPLING:
+                logging.getLogger(__name__).info(
+                    "Amostragem demográfica desativada via config."
+                )
+                _geo_sampler = None
+                return _geo_sampler
+        except ImportError:
+            pass
+        try:
+            from geo_sampler import GeoSampler
+            _geo_sampler = GeoSampler()
+            logging.getLogger(__name__).info(
+                f"GeoSampler ativado: {_geo_sampler}"
+            )
+        except (FileNotFoundError, ImportError, ValueError) as e:
+            logging.getLogger(__name__).warning(
+                f"GeoSampler indisponível — usando amostragem uniforme. "
+                f"Motivo: {e}"
+            )
+            _geo_sampler = None
+    return _geo_sampler
+
+
+def get_weighted_sp_coordinate() -> dict:
+    """
+    Gera coordenada ponderada pela população dos distritos de SP.
+    Fallback: amostragem uniforme caso GeoSampler não esteja disponível.
+    """
+    sampler = get_geo_sampler()
+    if sampler is not None:
+        return sampler.sample_coordinate()
+    return get_random_sp_coordinate()
+
+
+def get_weighted_restaurant_coordinate() -> dict:
+    """
+    Gera coordenada com viés comercial (para restaurantes).
+    Distritos com maior atividade comercial têm probabilidade aumentada.
+    Fallback: amostragem uniforme caso GeoSampler não esteja disponível.
+    """
+    sampler = get_geo_sampler()
+    if sampler is not None:
+        return sampler.sample_restaurant_coordinate()
+    return get_random_sp_coordinate()
+
 async def post_with_retry(
     client: httpx.AsyncClient,
     url: str,

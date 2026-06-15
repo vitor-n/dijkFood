@@ -279,8 +279,10 @@ def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
         "cd /home/ec2-user",
         # Instala dependências
         "sudo dnf install -y python3-pip docker",
+        "sudo dnf reinstall -y python3-dateutil python3-botocore python3-urllib3 awscli || sudo dnf install -y python3-dateutil",
         "sudo systemctl start docker",
-        "pip3 install networkx boto3 numpy shapely --quiet",
+        "python3 -m venv osrm_venv",
+        "osrm_venv/bin/pip install networkx boto3 numpy shapely --quiet",
         # Cria diretório de trabalho isolado
         "rm -rf osrm_build && mkdir -p osrm_build && cd osrm_build",
         # Baixa pkl e script do S3
@@ -288,7 +290,7 @@ def stage_build_osrm_data(outputs: dict[str, Any]) -> None:
         f"aws s3 cp s3://{graph_bucket}/osrm/pkl_to_osm.py . --region {region}",
         # Converte pkl → .osm
         "echo '>>> Convertendo pkl para .osm...'",
-        "python3 pkl_to_osm.py sao_paulo.pkl sao_paulo.osm",
+        "../osrm_venv/bin/python pkl_to_osm.py sao_paulo.pkl sao_paulo.osm",
         "echo '>>> Conversão concluída'",
         # Pré-processa com OSRM via Docker (sem instalação nativa)
         "sudo docker pull ghcr.io/project-osrm/osrm-backend:v5.27.1",

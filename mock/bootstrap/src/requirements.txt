@@ -3,3 +3,5 @@ faker
 python-dotenv
 shapely
 requests
+geopandas
+h3

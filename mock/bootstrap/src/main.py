@@ -13,9 +13,15 @@ import time
 import httpx
 from dataclasses import dataclass, field
 import sys
+from typing import Optional
 from faker import Faker
 from dotenv import load_dotenv
-from utils import get_random_sp_coordinate, post_with_retry
+from utils import (
+    get_random_sp_coordinate,
+    get_weighted_sp_coordinate,
+    get_weighted_restaurant_coordinate,
+    post_with_retry,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -83,7 +89,7 @@ class BatchResult:
 # ---------------------------------------------------------------------------
 
 async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = get_random_sp_coordinate()
+    loc = get_weighted_sp_coordinate()
     body = await post_with_retry(client, f"{BASE_URL}/users", {
         "name":  fake.name(),
         "email": fake.email(),
@@ -97,12 +103,19 @@ async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
 
 
 async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = get_random_sp_coordinate()
+    loc = get_weighted_restaurant_coordinate()
+    # Calcula índice H3 real a partir das coordenadas (resolução 7 ≈ 5 km²)
+    try:
+        import h3
+        h3_cell = h3.latlng_to_cell(loc["lat"], loc["lon"], 7)
+        h3_index = int(h3_cell, 16)
+    except (ImportError, Exception):
+        h3_index = random.randint(1, 1000)  # fallback se h3 não estiver instalado
     body = await post_with_retry(client, f"{BASE_URL}/restaurants", {
         "name":           fake.company(),
         "lat":            loc["lat"],
         "lon":            loc["lon"],
-        "H3_index":       random.randint(1, 1000),
+        "H3_index":       h3_index,
         "ID_cuisine_type": random.choice(CUISINE_TYPE_IDS),
     }, sem, config_retry, log)
     if body is None:
@@ -115,7 +128,7 @@ async def create_menu_item(
     client: httpx.AsyncClient,
     sem: asyncio.Semaphore,
     restaurant_id: int,
-) -> int | None:
+) -> Optional[int]:
     body = await post_with_retry(client, f"{BASE_URL}/restaurants/{restaurant_id}/menu", {
         "name":          fake.word().capitalize(),
     }, sem, config_retry, log)
