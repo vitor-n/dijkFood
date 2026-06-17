@@ -428,3 +428,36 @@ module "load_tester" {
   instance_type = var.load_tester_instance_type
   alb_dns       = module.alb.dns_name
 }
+
+
+module "cloudwatch_dashboard" {
+  source = "./modules/cloudwatch-dashboard"
+
+  project_name = var.project_name
+  aws_region   = var.aws_region
+
+  ecs_cluster_name        = module.ecs.cluster_name
+  core_api_service_name   = module.ecs.core_api_service_name
+  routing_service_name    = module.ecs.routing_service_name
+  tracking_service_name   = module.ecs.tracking_service_name
+  order_service_name      = module.ecs.order_service_name
+  prediction_service_name = module.prediction_service.service_name
+
+  alb_arn_suffix       = module.alb.arn_suffix
+  core_api_tg_suffix   = module.alb.core_api_target_group_arn_suffix
+  routing_tg_suffix    = module.alb.routing_target_group_arn_suffix
+  tracking_tg_suffix   = module.alb.tracking_target_group_arn_suffix
+  order_tg_suffix      = module.alb.order_target_group_arn_suffix
+  prediction_tg_suffix = module.prediction_service.target_group_arn_suffix
+
+  dynamodb_table_name = module.dynamodb.courier_positions_table_name
+  rds_instance_id     = module.rds.instance_id
+
+  ec2_load_tester_id = module.load_tester.instance_id
+  ec2_dashboard_id   = module.dashboard_ec2.instance_id
+  ec2_assistant_id   = module.assistant_ec2.instance_id
+
+  firehose_stream_name = module.datalake.firehose_stream_name
+  lambda_outbox_name   = module.position_forwarder.outbox_publisher_name
+}
+
