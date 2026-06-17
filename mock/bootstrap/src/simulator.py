@@ -6,6 +6,7 @@ Uso:
   python simulator.py                 # cenário padrão (10 req/s)
   SCENARIO=peak python simulator.py   # 50 req/s
   SCENARIO=event python simulator.py  # 200 req/s
+  SCENARIO=anomaly python simulator.py # injeta entregas lentas p/ a camada preditiva
   PLOT_METRICS=1 python simulator.py  # Plota métricas de latência
 
   BASE_URL=url SCENARIO=testing SIM_DURATION=10 PLOT_METRICS=1 python simulator.py 
@@ -125,6 +126,35 @@ def build_restaurant_population(rests_meta: list, config: SimConfig):
     return ids, weights
 
 
+def build_anomaly_targets(rests_meta: list, config: SimConfig):
+    """Escolhe a região 'afligida' (entregas lentas) e o conjunto de restaurantes
+    nela. Retorna (anomaly_region, slow_restaurant_ids). Se a injeção estiver
+    desligada, retorna (None, set())."""
+    if config.slow_delivery_pct <= 0.0 or not rests_meta:
+        return None, set()
+
+    # Região alvo: explícita (ANOMALY_REGION) ou a que tem mais restaurantes
+    # (maximiza o volume e, com isso, a robustez estatística da detecção).
+    if config.anomaly_region:
+        region = config.anomaly_region
+    else:
+        by_region: dict = {}
+        for m in rests_meta:
+            h3 = m.get("h3")
+            if h3 is not None:
+                by_region.setdefault(str(h3), []).append(m["id"])
+        if not by_region:
+            log.warning("[cenário] sem regiões (h3) para injetar anomalia")
+            return None, set()
+        region = max(by_region, key=lambda r: len(by_region[r]))
+
+    slow_ids = {m["id"] for m in rests_meta if str(m.get("h3")) == str(region)}
+    log.info(f"[cenário] anomalia: região {region} com {len(slow_ids)} restaurantes — "
+             f"{config.slow_delivery_pct:.0%} dos pedidos com atraso de "
+             f"{config.slow_delivery_min_s:.0f}-{config.slow_delivery_max_s:.0f}s")
+    return region, slow_ids
+
+
 async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
     """Reduz temporariamente a disponibilidade de entregadores marcando uma
     fração deles como OFFLINE (simula indisponibilidade)."""
@@ -159,7 +189,7 @@ async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore
     log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
              f"({config.courier_outage_pct:.0%})")
 
-async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None):
+async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None, slow_restaurant_ids=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
@@ -186,9 +216,15 @@ async def order_emitter(client, users, restaurants, config, weights=None, items_
         else:
             r_id = random.choice(restaurants)
 
+        # Injeta atraso (entrega lenta) numa fração dos pedidos da região afligida.
+        inject_delay_s = 0.0
+        if slow_restaurant_ids and r_id in slow_restaurant_ids and random.random() < config.slow_delivery_pct:
+            inject_delay_s = random.uniform(config.slow_delivery_min_s, config.slow_delivery_max_s)
+
         task = asyncio.create_task(run_order_lifecycle(
             client, sem, u_id, r_id, config,
-            items_menu=items_by_rest.get(r_id, []) if items_by_rest else []
+            items_menu=items_by_rest.get(r_id, []) if items_by_rest else [],
+            inject_delay_s=inject_delay_s,
         ))
         tasks.add(task)
         task.add_done_callback(_on_order_done)
@@ -221,11 +257,21 @@ async def main():
 
         log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
 
+        # Anomalia (A2): escolhe a região afligida e concentra a demanda nela
+        # (via mecanismo de hotspot) para garantir volume suficiente à detecção.
+        anomaly_region, slow_restaurant_ids = build_anomaly_targets(rests_meta, config)
+        if anomaly_region and not config.hotspot_region:
+            config.hotspot_region = anomaly_region
+            if config.hotspot_weight == 0.0:
+                config.hotspot_weight = 0.5
+
         # Cenários operacionais (A2): população ponderada + outage de entregadores.
         population, weights = build_restaurant_population(rests_meta, config)
         await apply_courier_outage(client, sem_init, config)
 
-        await order_emitter(client, users, population or restaurants, config, weights=weights, items_by_rest=items_by_rest)
+        await order_emitter(client, users, population or restaurants, config,
+                            weights=weights, items_by_rest=items_by_rest,
+                            slow_restaurant_ids=slow_restaurant_ids)
 
     total_duration = time.perf_counter() - sim_start
     metrics.report(config, total_duration)

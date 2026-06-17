@@ -125,13 +125,13 @@
       <div class="logo">D</div>
       <div>
         <h1>DijkFood · Dashboard Analítico</h1>
-        <p>Objetivo 3 — camada preditiva & conversacional · eventos via Kinesis Firehose → S3 → Athena</p>
+        <p>Objetivo 3 · Arquitetura Lambda — marts Parquet (batch) + eventos crus (speed) sobre o lake</p>
       </div>
     </div>
     <div class="spacer"></div>
     <div class="meta">
-      <span class="pill"><span class="dot"></span> lake near-real-time</span>
-      <div class="item"><div class="k">Janela</div><div class="v" id="lookback">—</div></div>
+      <span class="pill"><span class="dot"></span> lake durável · near-real-time</span>
+      <div class="item"><div class="k">Speed (tempo real)</div><div class="v" id="lookback">—</div></div>
       <div class="item"><div class="k">Atualizado</div><div class="v" id="updated">—</div></div>
       <a class="refresh" href="__ASSISTANT_URL__" style="text-decoration:none;color:var(--text);background:rgba(52,227,176,.12);border-color:rgba(52,227,176,.3)">
         💬 Assistente
@@ -151,7 +151,7 @@
     <section class="grid">
       <div class="card col-8">
         <h3><span class="bar"></span> Volume de pedidos no tempo</h3>
-        <div class="hint">Pedidos criados por hora</div>
+        <div class="hint">Pedidos criados por hora · batch (mart horário) + hora corrente em tempo real</div>
         <div class="plot" id="c_volume"></div>
       </div>
       <div class="card col-4">
@@ -235,12 +235,16 @@ const KPI_DEFS = [
 
 function fmtInt(v){ return (v==null?0:v).toLocaleString("pt-BR"); }
 
+let COURIER_WIN = 30; // min — janela "entregador ativo" (vinda da API)
+
 function renderKpis(k){
   const host = document.getElementById("kpis");
   host.innerHTML = KPI_DEFS.map(d => {
     const val = d.fmt(k[d.key]);
     const unit = d.unit ? `<small>${d.unit}</small>` : "";
-    const sub = d.subKey != null ? `<div class="sub">${fmtInt(k[d.subKey])} ${d.subLabel}</div>` : "";
+    let subTxt = d.subKey != null ? `${fmtInt(k[d.subKey])} ${d.subLabel}` : "";
+    if (d.key === "active_couriers") subTxt += ` · últimos ${COURIER_WIN} min`;
+    const sub = subTxt ? `<div class="sub">${subTxt}</div>` : "";
     return `<div class="kpi" style="--c1:${d.c}22">
       <div class="label"><span class="ic" style="background:${d.c}1f">${d.icon}</span>${d.label}</div>
       <div class="value">${val}${unit}</div>${sub}
@@ -392,6 +396,7 @@ async function load(){
     if(!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
 
+    if (d.courier_window_min) COURIER_WIN = d.courier_window_min;
     renderKpis(d.kpis || {});
     renderVolume(d.volume || {});
     renderOpen(d.open_states || {});
@@ -401,7 +406,7 @@ async function load(){
     renderHist(d.delivery_hist || {});
     renderRegion(d.regions || {});
 
-    document.getElementById("lookback").textContent = (d.lookback_days || "—") + " dias";
+    document.getElementById("lookback").textContent = (d.speed_lookback_days || "—") + "d · vivos";
     document.getElementById("updated").textContent = new Date(d.generated_at).toLocaleTimeString("pt-BR");
   } catch (e) {
     const b = document.getElementById("banner");

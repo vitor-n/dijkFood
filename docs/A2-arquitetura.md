@@ -60,9 +60,10 @@ indisponível durante a janela de retry. Custo baixo, ganho de corretude alto �
 - **raw** (Firehose → S3): JSON/GZIP, partição dinâmica `entidade/year/month/day`.
 - **curated** (Glue Job, **Parquet**): `curated_orders`, `curated_deliveries`,
   `curated_positions` — fatos limpos/conformados.
-- **marts** (Glue Job, **Parquet**): `mart_daily_volume`, `mart_region_distribution`,
-  `mart_top_restaurants`, `mart_demand_heatmap`, `mart_delivery_histogram`,
-  `mart_state_avg_seconds` — agregados prontos.
+- **marts** (Glue Job, **Parquet**): `mart_daily_volume`, `mart_hourly_volume`,
+  `mart_kpis`, `mart_region_distribution`, `mart_top_restaurants`,
+  `mart_demand_heatmap`, `mart_delivery_histogram`, `mart_state_avg_seconds` —
+  agregados prontos.
 
 O job é **Glue Python Shell** (`infra/glue/build_marts.py`) que executa Athena
 **CTAS** (cada tabela vira Parquet registrado no Glue Catalog), agendado por um
@@ -71,10 +72,29 @@ casar com a restrição de só termos a LabRole. O **raw permanece JSON** (forma
 nativo do Firehose para payload heterogêneo); **curated/marts são Parquet** — é
 exatamente o que o diagrama indica.
 
-Para alcançar a **Arquitetura Lambda (Speed Layer)**, o Dashboard não lê as tabelas
-Parquet (que atualizam apenas de hora em hora). As queries do Dashboard apontam
-direto para a tabela crua `events` via *Partition Projection*, refletindo o dado
-que acabou de ser despachado pelo Firehose (buffer otimizado de 60 segundos).
+**Arquitetura Lambda de verdade (batch + speed) no dashboard.** O dashboard
+reconcilia as duas vistas, em vez de varrer o cru:
+- **Batch view** — os indicadores históricos pesados (volume horário, heatmap,
+  top restaurantes, distribuição por região, histograma de entrega, tempo médio
+  por estado, KPIs cumulativos) são servidos das tabelas **`mart_*` Parquet**:
+  varredura de poucos KB → sub-segundo.
+- **Speed view** — só os indicadores **vivos** (pedidos abertos por estado,
+  entregadores ativos, volume da hora corrente, pedidos na última hora) batem na
+  tabela crua `events`, e numa **janela curta** (`SPEED_LOOKBACK_DAYS`, default
+  2 dias), refletindo o buffer Firehose de ~60 s.
+- **Merge** — o "volume no tempo" une o **mart horário** (`bucket < hora
+  corrente`) com a **hora corrente** vinda do speed: a reconciliação canônica do
+  padrão Lambda, sem dupla contagem.
+
+Se os marts ainda não existirem (1ª execução, antes do 1º job Glue), o dashboard
+**cai automaticamente** nas queries equivalentes sobre o cru (`*_raw`). Antes,
+**todas** as queries varriam 30 dias de JSON cru a cada refresh — o que tornava o
+dashboard lento; o `mock/bench_dashboard.py` mede a latência antes/depois.
+
+**Durabilidade (sem TTL).** A camada analítica é durável: o S3 **não tem regra de
+expiração** e o DynamoDB **não tem TTL** — nenhum dado é apagado. As janelas de
+"30 min" (entregadores ativos) e "última hora" (KPI) são **janelas de consulta**
+da speed view, não retenção; são configuráveis e explicitadas na UI.
 
 ### 2.3 Dashboard (EC2 dedicada)
 O dashboard (Plotly) computa via Athena os 6 indicadores obrigatórios + 2
@@ -106,7 +126,17 @@ roda o container do dashboard (porta 80); o `deploy.py` atualiza a imagem via SS
   falha a operação segue normalmente. O ETA volta na resposta e no evento.
 - **Demanda por região/horário** e **detecção de anomalias** (z-score de demanda;
   MAD para entregas lentas) são geradas em **batch** → `s3://…/predictions/`,
-  consumidas pelo dashboard e pelo assistente.
+  consumidas pelo dashboard e pelo assistente. O batch roda periodicamente
+  (`BATCH_INTERVAL_SECONDS`, default 300 s) **e** sob demanda (`/batch/run`), então
+  as anomalias aparecem no dashboard sem acionamento manual.
+- **Geração de anomalias para demonstração**: o simulador tem o cenário
+  `SCENARIO=anomaly`, que concentra a demanda numa região e injeta **atraso extra**
+  (`SLOW_DELIVERY_*`) numa fração dos pedidos dela → vira outlier de ETA detectado
+  pelo MAD e exibido no card de anomalias. (Correção relacionada: o piso de entrega
+  válida caiu de 60 s → `MIN_DELIVERY_SECONDS`=15 s, pois o simulador comprime o
+  ciclo de vida e o piso antigo descartava todas as entregas, deixando o ETA e o
+  MAD sem dados.) Para o **pico de demanda** (z-score), o bucket é configurável
+  (`ANOMALY_BUCKET_MINUTES`) para caber numa janela curta de simulação.
 - **Retreino gerenciado**: `EventBridge Scheduler → Step Functions →
   SageMaker Training Job → Lambda ml-callback` (promove o artefato para serving,
   **registra a versão no Model Registry**, recarrega o modelo no ECS e roda o
@@ -168,15 +198,19 @@ custo; o monitoramento é via logs do CloudWatch e `/model/info`.
 semântico para o S3; redeploy e smoke test.
 
 ## 7. Simulador — cenários parametrizáveis
-`SCENARIO=hotspot|concentration|outage` (ou knobs `HOTSPOT_REGION/HOTSPOT_WEIGHT`,
-`RESTAURANT_CONCENTRATION/HOT_RESTAURANT_COUNT`, `COURIER_OUTAGE_PCT`). Mantém os
-volumes da A1 (`normal/peak/event`).
+`SCENARIO=hotspot|concentration|outage|anomaly` (ou knobs `HOTSPOT_REGION/HOTSPOT_WEIGHT`,
+`RESTAURANT_CONCENTRATION/HOT_RESTAURANT_COUNT`, `COURIER_OUTAGE_PCT`,
+`SLOW_DELIVERY_PCT/SLOW_DELIVERY_MIN_S/SLOW_DELIVERY_MAX_S/ANOMALY_REGION`). Mantém os
+volumes da A1 (`normal/peak/event`). O relatório de métricas reporta P50/P90/P95/P99
+global e por rota.
 
 ## 8. Como executar
 ```bash
 python deploy.py deploy                      # provisiona + build/push + smoke
 SCENARIO=peak python deploy.py simulate      # carga (evidência de SLA)
 SCENARIO=hotspot python deploy.py simulate   # cenário operacional
+SCENARIO=anomaly python deploy.py simulate   # injeta entregas lentas (anomalias)
+DASHBOARD_URL=http://<host>/dashboard/api/data python mock/bench_dashboard.py  # latência batch vs cru
 ```
 Endpoints: `/dashboard` · `/chat` · `POST /predict/eta` · `GET /model/info` ·
 `POST /batch/run` · `GET /predict/demand` · `GET /predict/anomalies`.
@@ -184,7 +218,7 @@ Endpoints: `/dashboard` · `/chat` · `POST /predict/eta` · `GET /model/info` �
 ## 9. Reconciliação diagrama ↔ implementação
 - **Outbox/CDC**: outbox (tabela + Lambda publisher) garante atomicidade no RDS.
   O CDC do DynamoDB agora usa **EventBridge Pipes** direto para o Firehose (sem Lambda).
-- **Arquitetura Lambda / Speed Layer**: Dashboard consulta `events` (raw/JSON) com buffer de 60s no Firehose para near-real-time.
+- **Arquitetura Lambda (batch + speed)**: dashboard serve os indicadores históricos dos marts Parquet (batch) e só os indicadores vivos do cru `events` em janela curta (speed); o volume no tempo é o merge das duas vistas. Fallback automático ao cru se os marts ainda não existirem.
 - **Parquet**: curated/marts são Parquet (Glue CTAS) gerados para consolidação em batch.
 - **Model Registry / Training / Batch**: SageMaker de fato (registry + training job + batch via prediction-service).
 - **Serving**: ECS (decisão de robustez) — não Serverless Inference.

@@ -13,11 +13,26 @@ class Settings:
     ATHENA_WORKGROUP: str = os.environ.get("ATHENA_WORKGROUP", "dijkfood-analytics")
     EVENTS_TABLE: str = os.environ.get("EVENTS_TABLE", "events")
 
-    # Cache server-side dos indicadores (segundos) — o lake é near-real-time
-    # (buffer do Firehose ~300s), então não há ganho em consultar a cada request.
-    CACHE_TTL: int = int(os.environ.get("DASHBOARD_CACHE_TTL", "45"))
+    # ── Arquitetura Lambda (batch + speed) ────────────────────────────────────
+    # Os indicadores históricos pesados são servidos das tabelas Parquet `mart_*`
+    # (pré-agregadas de hora em hora pelo Glue) → varredura mínima, sub-segundo.
+    # Só os indicadores "vivos" (pedidos abertos, entregadores ativos, volume da
+    # hora corrente) batem na tabela crua `events`, e numa janela CURTA.
+    MARTS_ENABLED: bool = os.environ.get("DASHBOARD_USE_MARTS", "true").lower() in ("1", "true", "yes")
 
-    # Janela default das consultas (dias)
+    # Janela da SPEED layer (dias) — só os indicadores em tempo real varrem o cru.
+    SPEED_LOOKBACK_DAYS: int = int(os.environ.get("DASHBOARD_SPEED_LOOKBACK_DAYS", "2"))
+
+    # Janela (min) para considerar um entregador "ativo" (última posição reportada).
+    COURIER_WINDOW_MIN: int = int(os.environ.get("DASHBOARD_COURIER_WINDOW_MIN", "30"))
+
+    # Cache server-side dos indicadores (segundos). Como os marts atualizam de
+    # hora em hora e o speed tem buffer Firehose de ~60s, não há ganho em
+    # reconsultar a cada request.
+    CACHE_TTL: int = int(os.environ.get("DASHBOARD_CACHE_TTL", "90"))
+
+    # Janela default do FALLBACK cru (dias) — usada só quando os marts ainda não
+    # foram materializados (ex.: primeira execução, antes do 1º job Glue).
     LOOKBACK_DAYS: int = int(os.environ.get("DASHBOARD_LOOKBACK_DAYS", "30"))
 
     # Bucket do datalake (lê as previsões publicadas pelo prediction-service)

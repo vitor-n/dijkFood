@@ -74,6 +74,16 @@ class SimConfig:
     # Redução temporária da disponibilidade de entregadores.
     courier_outage_pct: float = float(os.getenv("COURIER_OUTAGE_PCT", 0.0))  # 0..1
 
+    # - Injeção de ANOMALIAS operacionais (A2) -
+    # Fração dos pedidos de uma região "afligida" que recebem atraso injetado
+    # antes da entrega → vira outlier de ETA (MAD) detectável pela camada
+    # preditiva e exibido no dashboard. Concentra a demanda nessa região para
+    # também estressar o pico de demanda.
+    slow_delivery_pct: float = float(os.getenv("SLOW_DELIVERY_PCT", 0.0))      # 0..1
+    slow_delivery_min_s: float = float(os.getenv("SLOW_DELIVERY_MIN_S", 90.0))  # atraso extra mín.
+    slow_delivery_max_s: float = float(os.getenv("SLOW_DELIVERY_MAX_S", 180.0)) # atraso extra máx.
+    anomaly_region: str = os.getenv("ANOMALY_REGION", "")  # H3 alvo; vazio = auto
+
     def __post_init__(self):
         # Cenários de volume (A1) + presets de cenário operacional (A2).
         scenarios_mapping = {
@@ -85,6 +95,7 @@ class SimConfig:
             "hotspot": 50.0,
             "concentration": 50.0,
             "outage": 50.0,
+            "anomaly": 50.0,
         }
         mapped_rps = scenarios_mapping.get(self.scenario)
         if self.orders_per_second <= 0.0:
@@ -97,3 +108,5 @@ class SimConfig:
             self.restaurant_concentration = 0.8
         if self.scenario == "outage" and self.courier_outage_pct == 0.0:
             self.courier_outage_pct = 0.6
+        if self.scenario == "anomaly" and self.slow_delivery_pct == 0.0:
+            self.slow_delivery_pct = 0.35

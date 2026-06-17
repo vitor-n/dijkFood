@@ -31,5 +31,23 @@ class Settings:
 
     MIN_TRAIN_SAMPLES: int = int(os.environ.get("MIN_TRAIN_SAMPLES", "40"))
 
+    # Piso (s) p/ considerar uma entrega válida no treino do ETA e na detecção de
+    # entregas lentas. O simulador comprime o ciclo de vida (entregas ~20-30 s),
+    # então um piso de 60 s descartava TODAS as entregas — modelo e anomalias
+    # ficavam sem dados. 15 s mantém o filtro de transições degeneradas sem matar
+    # a base. Entregas reais (produção) ficam muito acima disso.
+    MIN_DELIVERY_SECONDS: int = int(os.environ.get("MIN_DELIVERY_SECONDS", "15"))
+
+    # Detecção de anomalias de demanda (z-score sobre a série temporal por região).
+    # Bucket configurável: 60 min é o default honesto; para demonstrar picos numa
+    # janela curta de simulação, reduza (ex.: 5) para gerar buckets suficientes.
+    ANOMALY_BUCKET_MINUTES: int = int(os.environ.get("ANOMALY_BUCKET_MINUTES", "60"))
+    ANOMALY_MIN_BUCKETS: int = int(os.environ.get("ANOMALY_MIN_BUCKETS", "6"))
+
+    # Batch periódico (demanda + anomalias). 0 = desligado (roda só via /batch/run
+    # ou pela pipeline gerenciada). >0 = a cada N segundos, para o dashboard
+    # refletir anomalias automaticamente durante a demo.
+    BATCH_INTERVAL_SECONDS: int = int(os.environ.get("BATCH_INTERVAL_SECONDS", "300"))
+
 
 settings = Settings()

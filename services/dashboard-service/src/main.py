@@ -1,9 +1,11 @@
 """
-dashboard-service — camada analítica (batch/near-real-time) do DijkFood.
+dashboard-service — camada analítica (Arquitetura Lambda) do DijkFood.
 
-Renderiza os 6 indicadores obrigatórios + métricas de estado instantâneo da
-operação, consultando o Athena por cima do S3 alimentado pelo Firehose.
-A UI (Plotly) é servida estaticamente; os dados vêm de /dashboard/api/data.
+Serve os 6 indicadores obrigatórios + métricas de estado instantâneo + painel
+preditivo. Os indicadores históricos pesados vêm da BATCH layer (tabelas Parquet
+`mart_*`, pré-agregadas pelo Glue → varredura mínima); os indicadores "vivos"
+vêm da SPEED layer (tabela crua `events`, janela curta). O "volume no tempo" é a
+reconciliação batch+speed. A UI (Plotly) é servida estaticamente.
 """
 from __future__ import annotations
 
@@ -61,17 +63,40 @@ async def _safe(name: str, fn: Callable[[], str]) -> list[dict[str, Any]]:
         return []
 
 
-def _shape_kpis(kpi_rows, courier_rows, open_rows) -> dict[str, Any]:
-    k = kpi_rows[0] if kpi_rows else {}
+async def _safe_batch(name: str, mart_fn: Callable[[], str], raw_fn: Callable[[], str]) -> list[dict[str, Any]]:
+    """BATCH layer com fallback: tenta o mart Parquet; se a tabela ainda não
+    existe (ex.: antes do 1º job Glue), cai no equivalente sobre o cru."""
+    if not settings.MARTS_ENABLED:
+        return await _safe(name, raw_fn)
+    try:
+        return await asyncio.to_thread(run_query, mart_fn())
+    except Exception as exc:  # noqa: BLE001
+        log.info("mart '%s' indisponível (%s) — fallback no cru", name, exc)
+        return await _safe(name + ":raw", raw_fn)
+
+
+def _merge_volume(batch_rows: list[dict], speed_rows: list[dict]) -> dict[str, Any]:
+    """Reconciliação Lambda: histórico (mart horário) + hora corrente (speed)."""
+    merged: dict[str, int] = {}
+    for r in batch_rows:
+        merged[str(r["bucket"])] = int(r["orders"])
+    for r in speed_rows:  # a hora corrente sobrescreve qualquer resíduo
+        merged[str(r["bucket"])] = int(r["orders"])
+    buckets = sorted(merged.keys())
+    return {"x": buckets, "y": [merged[b] for b in buckets]}
+
+
+def _shape_kpis(batch_kpi_rows, last_hour_rows, courier_rows, open_rows) -> dict[str, Any]:
+    k = batch_kpi_rows[0] if batch_kpi_rows else {}
+    lh = last_hour_rows[0] if last_hour_rows else {}
     c = courier_rows[0] if courier_rows else {}
     open_orders = sum(int(r.get("orders") or 0) for r in open_rows)
     avg_min = k.get("avg_delivery_min")
     return {
         "total_orders": int(k.get("total_orders") or 0),
-        "orders_last_hour": int(k.get("orders_last_hour") or 0),
+        "orders_last_hour": int(lh.get("orders_last_hour") or 0),
         "delivered_orders": int(k.get("delivered_orders") or 0),
         "avg_delivery_min": round(float(avg_min), 1) if avg_min is not None else None,
-        "unique_users": int(k.get("unique_users") or 0),
         "active_couriers": int(c.get("active") or 0),
         "available_couriers": int(c.get("available") or 0),
         "busy_couriers": int(c.get("busy") or 0),
@@ -82,39 +107,36 @@ def _shape_kpis(kpi_rows, courier_rows, open_rows) -> dict[str, Any]:
 @app.get("/dashboard/api/data")
 async def dashboard_data():
     (
-        volume, state_times, regions, heatmap, top_rest,
-        hist, open_states, couriers, kpi_rows,
+        kpi_rows, volume_batch, state_times, regions, heatmap, top_rest, hist,
+        volume_speed, last_hour, open_states, couriers,
     ) = await asyncio.gather(
-        _safe("volume", Q.volume_over_time),
-        _safe("state_times", Q.avg_time_per_state),
-        _safe("regions", Q.orders_by_region),
-        _safe("heatmap", Q.demand_heatmap),
-        _safe("top_restaurants", Q.top_restaurants),
-        _safe("delivery_hist", Q.delivery_time_histogram),
-        _safe("open_states", Q.open_orders_by_state),
-        _safe("couriers", Q.active_couriers),
-        _safe("kpis", Q.kpis),
+        # ── BATCH layer (marts Parquet, com fallback no cru) ──
+        _safe_batch("kpis", Q.mart_kpis, Q.raw_kpis),
+        _safe_batch("volume", Q.mart_volume, Q.raw_volume),
+        _safe_batch("state_times", Q.mart_state_times, Q.raw_state_times),
+        _safe_batch("regions", Q.mart_regions, Q.raw_regions),
+        _safe_batch("heatmap", Q.mart_heatmap, Q.raw_heatmap),
+        _safe_batch("top_restaurants", Q.mart_top_restaurants, Q.raw_top_restaurants),
+        _safe_batch("delivery_hist", Q.mart_delivery_hist, Q.raw_delivery_hist),
+        # ── SPEED layer (cru, janela curta) ──
+        _safe("volume_speed", Q.speed_volume),
+        _safe("orders_last_hour", Q.speed_orders_last_hour),
+        _safe("open_states", Q.speed_open_orders_by_state),
+        _safe("couriers", Q.speed_active_couriers),
     )
 
-    # ── Volume no tempo ──
-    volume_out = {
-        "x": [r["bucket"] for r in volume],
-        "y": [int(r["orders"]) for r in volume],
-    }
+    volume_out = _merge_volume(volume_batch, volume_speed)
 
-    # ── Tempo médio por estado (em minutos) ──
     state_times_out = {
         "labels": [Q.STATE_NAMES.get(int(r["id_state"]), f"Estado {r['id_state']}") for r in state_times],
         "minutes": [round(float(r["avg_seconds"]) / 60.0, 2) if r.get("avg_seconds") is not None else 0 for r in state_times],
     }
 
-    # ── Distribuição por região ──
     regions_out = {
         "labels": [str(r["region"]) for r in regions],
         "orders": [int(r["orders"]) for r in regions],
     }
 
-    # ── Heatmap demanda (7 x 24) ──
     z = [[0 for _ in range(24)] for _ in range(7)]
     for r in heatmap:
         dow = int(r["dow"])  # 1=Seg .. 7=Dom
@@ -127,19 +149,16 @@ async def dashboard_data():
         "hours": list(range(24)),
     }
 
-    # ── Top 10 restaurantes ──
     top_out = {
         "labels": [str(r["name"]) for r in top_rest],
         "orders": [int(r["orders"]) for r in top_rest],
     }
 
-    # ── Histograma do tempo de entrega ──
     hist_out = {
         "bins": [int(r["bin_min"]) for r in hist],
         "orders": [int(r["orders"]) for r in hist],
     }
 
-    # ── Pedidos abertos por estado ──
     open_out = {
         "labels": [Q.STATE_NAMES.get(int(r["id_state"]), f"Estado {r['id_state']}") for r in open_states],
         "orders": [int(r["orders"]) for r in open_states],
@@ -147,8 +166,9 @@ async def dashboard_data():
 
     return JSONResponse({
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "lookback_days": settings.LOOKBACK_DAYS,
-        "kpis": _shape_kpis(kpi_rows, couriers, open_states),
+        "speed_lookback_days": settings.SPEED_LOOKBACK_DAYS,
+        "courier_window_min": settings.COURIER_WINDOW_MIN,
+        "kpis": _shape_kpis(kpi_rows, last_hour, couriers, open_states),
         "volume": volume_out,
         "state_times": state_times_out,
         "regions": regions_out,

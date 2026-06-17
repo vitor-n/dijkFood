@@ -64,7 +64,7 @@ async def fetch_route(client, sem, config, orig_lat, orig_lon, dest_lat, dest_lo
 # Ciclo de Vida do Pedido
 # ---------------------------------------------------------------------------
 
-async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore, user_id: int, restaurant_id: int, config: SimConfig, items_menu: list = None):
+async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore, user_id: int, restaurant_id: int, config: SimConfig, items_menu: list = None, inject_delay_s: float = 0.0):
     # 1. Criação
     payload = {"id_user": user_id, "id_restaurant": restaurant_id}
     if items_menu:
@@ -166,7 +166,12 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
             })
             await asyncio.sleep(config.position_report_interval)
 
-    # 5. Estado Final (IN_TRANSIT -> DELIVERED)
+    # 5. Anomalia injetada: atraso extra antes da entrega (entrega lenta).
+    #    Vira outlier de ETA (detecção via MAD na camada preditiva).
+    if inject_delay_s > 0:
+        await asyncio.sleep(inject_delay_s)
+
+    # 6. Estado Final (IN_TRANSIT -> DELIVERED)
     result = await advance(OrderState.DELIVERED)
     if not result:
         metrics.orders_failed += 1
