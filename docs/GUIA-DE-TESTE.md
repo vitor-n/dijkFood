@@ -169,7 +169,15 @@ retorna `eta_minutes` + `eta_source`.
 ## Fase 7 — Batch: demanda + anomalias
 
 ```powershell
-# computa e materializa as previsões no S3
+# (a) GERA anomalias: o cenário 'anomaly' concentra a demanda numa região e
+#     injeta entregas lentas nela (vira outlier de ETA detectado por MAD).
+$env:SCENARIO="anomaly"; python deploy.py simulate
+#     knobs opcionais: SLOW_DELIVERY_PCT, SLOW_DELIVERY_MIN_S/MAX_S, ANOMALY_REGION
+
+# aguarde ~60-90 s (buffer do Firehose) para os eventos caírem no lake.
+
+# (b) computa e materializa as previsões no S3 (o batch também roda sozinho a
+#     cada BATCH_INTERVAL_SECONDS=300 s; aqui forçamos na hora)
 Invoke-RestMethod -Method Post -Uri "http://$ALB/batch/run"
 
 # lê as previsões
@@ -180,9 +188,14 @@ Invoke-RestMethod -Uri "http://$ALB/predict/anomalies"
 aws s3 ls "s3://$BUCKET/predictions/" --recursive
 ```
 
-**✅ Checkpoint:** `batch/run` retorna contagem de regiões/anomalias; os GETs
-retornam JSON; e no **dashboard** (recarregue) o painel **"Camada Preditiva"**
-mostra o forecast das próximas 24h + cards de anomalias.
+**✅ Checkpoint:** `batch/run` retorna contagem de regiões/anomalias (> 0 após o
+cenário `anomaly`); `predict/anomalies` lista `slow_deliveries` na região
+afligida; e no **dashboard** (recarregue) o painel **"Camada Preditiva"** mostra
+o forecast + cards de anomalias.
+
+> Pico de demanda (z-score) precisa de série temporal: para demonstrá-lo numa
+> janela curta, suba o prediction-service com `ANOMALY_BUCKET_MINUTES=5` (ou
+> menor) e rode uma simulação mais longa.
 
 ---
 

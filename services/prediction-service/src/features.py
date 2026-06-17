@@ -49,7 +49,7 @@ def eta_training_data() -> str:
            date_diff('second', created_at, delivered_at) / 60.0 AS minutes
     FROM lifecycle
     WHERE delivered_at IS NOT NULL
-      AND date_diff('second', created_at, delivered_at) BETWEEN 60 AND 21600
+      AND date_diff('second', created_at, delivered_at) BETWEEN """ + str(settings.MIN_DELIVERY_SECONDS) + """ AND 21600
     """
 
 
@@ -68,12 +68,22 @@ def demand_history() -> str:
 
 
 def hourly_counts() -> str:
-    """Série horária de pedidos por região (para detecção de anomalias de demanda)."""
-    return _ctes() + """
+    """Série temporal de pedidos por região (base da detecção de picos de demanda).
+
+    O bucket é configurável (ANOMALY_BUCKET_MINUTES): 60 min em produção; menor
+    para demonstrar picos numa janela curta de simulação.
+    """
+    n = settings.ANOMALY_BUCKET_MINUTES
+    if n == 60:
+        bucket = "date_trunc('hour', o.created_at)"
+    else:
+        secs = n * 60
+        bucket = f"from_unixtime(floor(to_unixtime(o.created_at) / {secs}) * {secs})"
+    return _ctes() + f"""
     SELECT coalesce(r.region, -1) AS region,
-           date_trunc('hour', o.created_at) AS bucket,
+           {bucket} AS bucket,
            count(*) AS orders
     FROM orders_created o
     LEFT JOIN restaurants r ON o.id_restaurant = r.id_restaurant
-    GROUP BY coalesce(r.region, -1), date_trunc('hour', o.created_at)
+    GROUP BY coalesce(r.region, -1), {bucket}
     """

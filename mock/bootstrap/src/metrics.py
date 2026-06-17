@@ -52,14 +52,14 @@ class Metrics:
         success = sum(1 for r in self.records if r["status"] in (200, 201))
         if len(all_lat) >= 2:
             gq = statistics.quantiles(all_lat, n=100)
-            g_p50, g_p90, g_p95 = gq[49], gq[89], gq[94]
+            g_p50, g_p90, g_p95, g_p99 = gq[49], gq[89], gq[94], gq[98]
         else:
-            g_p50 = g_p90 = g_p95 = all_lat[0]
+            g_p50 = g_p90 = g_p95 = g_p99 = all_lat[0]
         print(f"SLA GLOBAL | reqs: {total} | sucesso: {success} "
               f"({100*success/total:.1f}%) | erros HTTP: {http_errors} | erros rede/timeout: {net_errors} "
               f"| taxa de erro: {100*(http_errors+net_errors)/total:.2f}%")
         print(f"Latência global | P50: {g_p50:.1f}ms | P90: {g_p90:.1f}ms | P95: {g_p95:.1f}ms "
-              f"(requisito P95 < 500ms)")
+              f"| P99: {g_p99:.1f}ms (requisito P95 < 500ms)")
         print("=" * 80)
 
         by_endpoint: dict = {}
@@ -75,8 +75,8 @@ class Metrics:
             key = f"{r['method']} {ep}"
             by_endpoint.setdefault(key, []).append(r)
 
-        print(f"{'ENDPOINT':<33s} | {'COUNT':<6s} | {'AVG':<7s} | {'P50':<7s} | {'P90':<7s} | {'P95 (Req P95<500ms)':<19s}")
-        print("-" * 92)
+        print(f"{'ENDPOINT':<33s} | {'COUNT':<6s} | {'AVG':<7s} | {'P50':<7s} | {'P90':<7s} | {'P95':<7s} | {'P99 (Req P95<500ms)':<19s}")
+        print("-" * 104)
         for key, records in sorted(by_endpoint.items()):
             latencies = [r["latency_ms"] for r in records]
             n = len(latencies)
@@ -86,11 +86,12 @@ class Metrics:
                 p50 = quantiles[49]
                 p90 = quantiles[89]
                 p95 = quantiles[94]
+                p99 = quantiles[98]
             else:
-                p50 = p90 = p95 = latencies[0]
+                p50 = p90 = p95 = p99 = latencies[0]
             # Alerta visual se passar de 500ms
-            p95_str = f"{p95:6.1f}ms" + (" [!]" if p95 > 500 else "    ")
-            print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p90:5.1f}ms | {p95_str:<19s}")
+            p99_str = f"{p99:6.1f}ms" + (" [!]" if p95 > 500 else "    ")
+            print(f"{key:<33s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p90:5.1f}ms | {p95:5.1f}ms | {p99_str:<19s}")
         print("=" * 92)
 
         if config.plot_metrics:

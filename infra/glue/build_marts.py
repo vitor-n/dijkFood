@@ -137,6 +137,18 @@ def main():
     materialize("mart_daily_volume", "marts",
                 "SELECT date(created_at) AS day, count(*) AS orders FROM curated_orders GROUP BY 1")
 
+    # Volume horário: base da BATCH layer do "volume no tempo" no dashboard.
+    # A hora corrente é completada pela SPEED layer (reconciliação Lambda).
+    materialize("mart_hourly_volume", "marts",
+                "SELECT date_trunc('hour', created_at) AS bucket, count(*) AS orders "
+                "FROM curated_orders GROUP BY 1")
+
+    # KPIs cumulativos exatos (1 linha) — lidos diretamente pelo dashboard.
+    materialize("mart_kpis", "marts",
+                "SELECT (SELECT count(*) FROM curated_orders)              AS total_orders, "
+                "       (SELECT count(*) FROM curated_deliveries)          AS delivered_orders, "
+                "       (SELECT avg(delivery_minutes) FROM curated_deliveries) AS avg_delivery_min")
+
     materialize("mart_region_distribution", "marts",
                 "SELECT region, count(*) AS orders FROM curated_orders WHERE region IS NOT NULL GROUP BY region")
 

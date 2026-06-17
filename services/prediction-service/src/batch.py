@@ -110,7 +110,7 @@ def detect_anomalies() -> dict[str, Any]:
     recent_cutoff = now - timedelta(hours=48)
     for reg, series in by_region.items():
         vals = np.array([float(s["orders"]) for s in series])
-        if len(vals) < 6:
+        if len(vals) < settings.ANOMALY_MIN_BUCKETS:
             continue
         mu, sigma = float(vals.mean()), float(vals.std())
         if sigma <= 0:

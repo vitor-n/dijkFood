@@ -45,10 +45,26 @@ def _reload_loop():
             log.warning("Reload do modelo falhou: %s", exc)
 
 
+def _batch_loop():
+    """Roda o batch (demanda + anomalias) periodicamente, para o dashboard
+    refletir as previsões/anomalias sem acionamento manual durante a demo."""
+    interval = settings.BATCH_INTERVAL_SECONDS
+    if interval <= 0:
+        return
+    while True:
+        time.sleep(interval)
+        try:
+            summary = batch.run_and_store()
+            log.info("batch periódico: %s", summary)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("batch periódico falhou: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     threading.Thread(target=_bootstrap, daemon=True).start()
     threading.Thread(target=_reload_loop, daemon=True).start()
+    threading.Thread(target=_batch_loop, daemon=True).start()
     yield
 
 
