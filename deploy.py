@@ -3,21 +3,22 @@
 DijkFood — deploy automatizado (Terraform + ECR + RDS + ECS)
 
 Comandos:
-    python deploy.py deploy    Aplica a infraestrutura, faz build/push das imagens, força o deploy ECS e faz smoke test.
-    python deploy.py update    Recompila e faz push das imagens do docker.
-    python deploy.py destroy   Destrói a infraestrutura com o Terraform (exige as mesmas credenciais de DB que o apply).
-    python deploy.py all       Faz deploy, executa testes e destrói a infraestrutura (com confirmação ou AUTO_DESTROY).
-    python deploy.py plan      Apenas executa o `terraform plan` para análise da infraestrutura
-    python deploy.py smoke     Faz só health checks no ALB (exige state/terraform output).
-    python deploy.py simulate  Executa (na máquina EC2 criada na AWS) a simulação de requests
+    python deploy.py deploy       Aplica a infraestrutura, faz build/push das imagens, força o deploy ECS e faz smoke test.
+    python deploy.py update       Recompila e faz push das imagens do docker.
+    python deploy.py destroy      Destrói a infraestrutura com o Terraform.
+    python deploy.py all          Faz deploy, executa testes e destrói a infraestrutura (com confirmação ou AUTO_DESTROY).
+    python deploy.py plan         Apenas executa o `terraform plan` para análise da infraestrutura
+    python deploy.py smoke        Faz só health checks no ALB (exige state/terraform output).
+    python deploy.py populate     (EC2) Roda script para popular o BD. Suporta: users=X restaurants=Y couriers=Z
+    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot
+    python deploy.py load_test    (EC2) Executa populate seguido de simulate com valores padrão.
 
 Variáveis de ambiente:
-    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida). Obrigatória no deploy salvo SKIP_DB_INIT=1; no destroy pode ficar vazia se estiver só no TF_VAR_FILE.
+    DB_PASSWORD         Senha master RDS: repassada ao Terraform via -var (se definida).
     DB_USERNAME         Usuário RDS (default: dijkfood_admin).
     TF_VAR_FILE         .tfvars (ex.: dev.tfvars), buscado na raiz do repo e em infra/terraform.
     AUTO_DESTROY        Se "1"/"true", comando `all` destrói sem prompt (CI).
     SKIP_DESTROY        Se "1"/"true", comando `all` não executa destroy após o deploy.
-    SCENARIO            O cenário para rodar a simulação. Ver documentação do arquivo mock/bootstrap/src/simulator.py
 
 Credenciais AWS: ~/.aws/credentials (não commitar segredos no repositório).
 
@@ -629,14 +630,7 @@ def run_full_deploy(db_user: str, db_password: str | None) -> dict[str, Any]:
     
     return outputs
 
-def stage_run_load_test(outputs: dict[str, Any]) -> None:
-    print("\n======== Rodando simulacao de carga com o EC2 ========")
-    
-    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
-    if not instance_id:
-        print("[Erro] ID da instância EC2 para testes não encontrada nos outputs.")
-        return
-
+def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: str, force_update: bool = False) -> None:
     main_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "main.py")
     simulator_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "simulator.py")
     config_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "config.py")
@@ -659,11 +653,9 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         utils_content = f.read()
     with open(req_path, "r", encoding="utf-8") as f:
         simulator_requirements = f.read()
-    
-    
-    scenario: str = os.getenv("SCENARIO", "normal")
-    tracking_lifetime: str = os.getenv("TRACKING_LIFETIME", 5.0)
-    #Essa stack de comandos vai ser executada no EC2, pra poder rodar o arquivo
+
+    force_str = "true" if force_update else "false"
+
     commands = [
         "#!/bin/bash",
         "set -e",
@@ -671,6 +663,8 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         "sudo dnf install -y python3-pip",
         "mkdir -p mock_test",
         "cd mock_test",
+        f"if [ ! -f .env_ready ] || [ \"{force_str}\" = \"true\" ]; then",
+        "echo \"Preparando ambiente...\"",
         "cat << \"EOF_REQ\" > requirements.txt",
         simulator_requirements,
         "EOF_REQ",
@@ -693,19 +687,41 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         simulator_content,
         "EOF_SIM",
         "pip3 install -r requirements.txt",
-        "set -a; source /etc/environment; set +a",
-        "echo \"========= Iniciando Populate ========\"",
-        f"PYTHONIOENCODING=utf-8 SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u main.py",
-        "echo \"========= Iniciando Simulacao ========\"",
-        f"PYTHONIOENCODING=utf-8 SCENARIO={scenario} TRACKING_LIFETIME={tracking_lifetime} python3 -u simulator.py"
+        "touch .env_ready",
+        "else",
+        "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
+        "fi"
     ]
 
-    log_group_name = "/aws/ssm/dijkfood-full-simulation"
+    print("Enviando arquivos de simulação para o EC2 via SSM...")
+    try:
+        response = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": commands}
+        )
+        cmd_id = response["Command"]["CommandId"]
+        
+        while True:
+            time.sleep(5)
+            try:
+                inv = ssm_client.get_command_invocation(
+                    CommandId=cmd_id,
+                    InstanceId=instance_id
+                )
+                status = inv["Status"]
+                if status not in ("Pending", "InProgress", "Delayed"):
+                    if status != "Success":
+                        raise RuntimeError(f"Erro ao preparar ambiente. Status: {status}")
+                    break
+            except ssm_client.exceptions.InvocationDoesNotExist:
+                continue
+    except Exception as exc:
+        print(f"  Falha ao enviar arquivos de simulação: {exc}")
+        raise
 
-    aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
-    ssm_client = boto3.client("ssm", region_name = aws_region)
-    
-    print("Enviando scripts de simulação para o EC2 via SSM...")
+
+def _run_ssm_command(ssm_client, instance_id: str, aws_region: str, commands: list[str], log_group_name: str, step_name: str) -> None:
     try:
         response = ssm_client.send_command(
             InstanceIds=[instance_id],
@@ -721,31 +737,143 @@ def stage_run_load_test(outputs: dict[str, Any]) -> None:
         cw_group_encoded = log_group_name.replace("/", "$252F")
         cw_url = f"https://{aws_region}.console.aws.amazon.com/cloudwatch/home?region={aws_region}#logsV2:log-groups/log-group/{cw_group_encoded}"
         
-        print(f"Simulação Iniciada na EC2 (id {cmd_id})")
-        print("É possível acompanhar os outputs da simulação pelo link:")
+        print(f"{step_name} iniciado na EC2 (id {cmd_id})")
+        print("É possível acompanhar os outputs pelo link:")
         print(f"{cw_url}\n")
 
         while True:
             time.sleep(10)
-            print(".", end = "")
+            print(".", end="", flush=True)
             try:
                 inv = ssm_client.get_command_invocation(
-                    CommandId = cmd_id,
-                    InstanceId = instance_id
+                    CommandId=cmd_id,
+                    InstanceId=instance_id
                 )
                 status = inv["Status"]
                 if status not in ("Pending", "InProgress", "Delayed"):
-                    print("\nProcesso da simulação finalizado com status: " + status)
+                    print(f"\nProcesso finalizado com status: {status}")
+                    
+                    stdout = inv.get("StandardOutputContent", "")
+                    stderr = inv.get("StandardErrorContent", "")
+                    
+                    if stdout:
+                        summary_idx = stdout.find("RELATÓRIO DO SIMULADOR")
+                        if summary_idx == -1:
+                            summary_idx = stdout.find("RESUMO DO BOOTSTRAP")
+                            
+                        print("\n=== Resumo do EC2 ===")
+                        if summary_idx != -1:
+                            # Volta um pouco para pegar os separadores "===="
+                            start_idx = stdout.rfind("=", 0, summary_idx)
+                            if start_idx != -1:
+                                # Acha o início da linha dos "===="
+                                start_line = stdout.rfind("\n", 0, start_idx)
+                                print(stdout[start_line+1:].strip())
+                            else:
+                                print(stdout[summary_idx:].strip())
+                        else:
+                            # Fallback: exibe as últimas 30 linhas
+                            lines = stdout.strip().split("\n")
+                            if len(lines) > 30:
+                                print("... (saída anterior omitida, acesse o CloudWatch para logs completos) ...")
+                                print("\n".join(lines[-30:]))
+                            else:
+                                print(stdout.strip())
+                                
+                    if stderr:
+                        print("\n=== Erros do EC2 ===")
+                        print(stderr)
+                        
+                    if status != "Success":
+                        print(f"[{step_name}] Aviso: Comando finalizou com erro.")
+                        
                     break
             except ssm_client.exceptions.InvocationDoesNotExist:
                 continue
 
     except Exception as exc:
-        print(f"  Falha ao iniciar/monitorar a simulação: {exc}")
+        print(f"  Falha ao iniciar/monitorar comando SSM ({step_name}): {exc}")
+
+
+def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurants: str | None = None, couriers: str | None = None, force_update: bool = False) -> None:
+    print("\n======== Rodando populate no EC2 ========")
+    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
+    if not instance_id:
+        print("[Erro] ID da instância EC2 para testes não encontrada nos outputs.")
+        return
+
+    aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    ssm_client = boto3.client("ssm", region_name=aws_region)
+
+    _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
+
+    env_vars = "PYTHONIOENCODING=utf-8"
+    if users: env_vars += f" NUM_USERS={users}"
+    if restaurants: env_vars += f" NUM_RESTAURANTS={restaurants}"
+    if couriers: env_vars += f" NUM_COURIERS={couriers}"
+
+    commands = [
+        "#!/bin/bash",
+        "set -e",
+        "cd /home/ec2-user/mock_test",
+        "set -a; source /etc/environment; set +a",
+        "echo \"========= Iniciando Populate ========\"",
+        f"{env_vars} python3 -u main.py"
+    ]
+
+    _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
+
+
+def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False) -> None:
+    print("\n======== Rodando simulacao de carga no EC2 ========")
+    instance_id = outputs.get("load_tester_instance_id", {}).get("value")
+    if not instance_id:
+        print("[Erro] ID da instância EC2 para testes não encontrada nos outputs.")
+        return
+
+    aws_region = outputs.get("aws_region", {}).get("value") or "us-east-1"
+    datalake_bucket = outputs.get("datalake_bucket_name", {}).get("value") or ""
+    ssm_client = boto3.client("ssm", region_name=aws_region)
+
+    _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
+
+    env_vars = "PYTHONIOENCODING=utf-8"
+    if scenario: env_vars += f" SCENARIO={scenario}"
+    if duration: env_vars += f" SIM_DURATION={duration}"
+    if plot: env_vars += " PLOT_METRICS=1"
+
+    commands = [
+        "#!/bin/bash",
+        "set -e",
+        "cd /home/ec2-user/mock_test",
+        "mkdir -p plots",
+    ]
+    if plot:
+        commands.append("pip3 install matplotlib")
+
+    commands.extend([
+        "set -a; source /etc/environment; set +a",
+        "echo \"========= Iniciando Simulacao ========\"",
+        f"{env_vars} python3 -u simulator.py"
+    ])
+
+    if plot and datalake_bucket:
+        commands.append(f"aws s3 sync plots/ s3://{datalake_bucket}/plots/ --region {aws_region}")
+
+    _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-simulate", "Simulate")
+
+    if plot and datalake_bucket:
+        print(f"\nOs plots gerados foram enviados para o S3. Para baixar, execute localmente:")
+        print(f"  aws s3 cp s3://{datalake_bucket}/plots/ . --recursive")
+
+
+def stage_load_test(outputs: dict[str, Any], force_update: bool = False) -> None:
+    print("\n======== Rodando load test completo (Populate + Simulate) no EC2 ========")
+    stage_populate(outputs, force_update=force_update)
+    stage_simulate(outputs, force_update=False)
 
 def print_usage() -> None:
     print(__doc__)
-
 
 def main() -> None:
     if len(sys.argv) < 2:
@@ -753,7 +881,7 @@ def main() -> None:
         sys.exit(1)
 
     action = sys.argv[1].strip().lower()
-    valid = ("deploy", "update", "destroy", "all", "plan", "smoke", "help", "simulate", "-h", "--help")
+    valid = ("deploy", "update", "destroy", "all", "plan", "smoke", "help", "populate", "simulate", "load_test", "-h", "--help")
     if action in ("help", "-h", "--help"):
         print_usage()
         return
@@ -795,15 +923,37 @@ def main() -> None:
         run_full_deploy(db_user, db_pass_env)
         return
 
+    if action == "populate":
+        out = tf_output()
+        args_lower = [arg.lower() for arg in sys.argv[2:]]
+        force_update = "force_update" in args_lower
+        users = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("users=")), None)
+        restaurants = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("restaurants=")), None)
+        couriers = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("couriers=")), None)
+        stage_populate(out, users, restaurants, couriers, force_update)
+        return
+
     if action == "simulate":
         out = tf_output()
-        stage_run_load_test(out)
+        args_lower = [arg.lower() for arg in sys.argv[2:]]
+        force_update = "force_update" in args_lower
+        scenario = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("scenario=")), None)
+        duration = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("duration=")), None)
+        plot = "plot" in args_lower
+        stage_simulate(out, scenario, duration, plot, force_update)
+        return
+
+    if action == "load_test":
+        out = tf_output()
+        args_lower = [arg.lower() for arg in sys.argv[2:]]
+        force_update = "force_update" in args_lower
+        stage_load_test(out, force_update)
         return
 
     if action == "all":
         check_docker_ready()
         outputs = run_full_deploy(db_user, db_pass_env)
-        stage_run_load_test(outputs)
+        stage_load_test(outputs, force_update=True)
         if _truthy("SKIP_DESTROY"):
             print("\nSKIP_DESTROY=1 — não executando destroy.")
             return
@@ -815,7 +965,6 @@ def main() -> None:
 
     print_usage()
     sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
