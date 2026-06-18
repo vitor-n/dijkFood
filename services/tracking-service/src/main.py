@@ -32,7 +32,11 @@ async def lifespan(app: FastAPI):
         kwargs["endpoint_url"] = ep
         
     from botocore.config import Config
-    boto_config = Config(max_pool_connections=200)
+    boto_config = Config(
+        max_pool_connections=200,
+        connect_timeout=5,   # evita travar o worker se o DynamoDB demorar a conectar
+        read_timeout=10,     # evita travar o worker em leituras lentas
+    )
     kwargs["config"] = boto_config
 
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
