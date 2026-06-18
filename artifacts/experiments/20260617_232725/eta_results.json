@@ -1,0 +1,153 @@
+{
+  "status": "OK",
+  "model_info": {
+    "ready": false,
+    "fallback_minutes": 35.0
+  },
+  "health": {
+    "http": 200,
+    "body": {
+      "status": "ok"
+    }
+  },
+  "calls": [
+    {
+      "id_restaurant": 1,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 520.5
+    },
+    {
+      "id_restaurant": 2,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 531.7
+    },
+    {
+      "id_restaurant": 3,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 531.4
+    },
+    {
+      "id_restaurant": 4,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 519.8
+    },
+    {
+      "id_restaurant": 5,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 512.2
+    },
+    {
+      "id_restaurant": 6,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 535.0
+    },
+    {
+      "id_restaurant": 7,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 548.5
+    },
+    {
+      "id_restaurant": 8,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 539.5
+    },
+    {
+      "id_restaurant": 9,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 552.0
+    },
+    {
+      "id_restaurant": 10,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 514.2
+    },
+    {
+      "id_restaurant": 11,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 579.2
+    },
+    {
+      "id_restaurant": 12,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 506.5
+    },
+    {
+      "id_restaurant": 13,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 545.1
+    },
+    {
+      "id_restaurant": 14,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 501.3
+    },
+    {
+      "id_restaurant": 15,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 514.5
+    },
+    {
+      "id_restaurant": 16,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 501.4
+    },
+    {
+      "id_restaurant": 17,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 504.5
+    },
+    {
+      "id_restaurant": 18,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 572.8
+    },
+    {
+      "id_restaurant": 19,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 524.1
+    },
+    {
+      "id_restaurant": 20,
+      "eta_minutes": 35.0,
+      "source": "fallback_constant",
+      "latency_ms": 519.0
+    }
+  ],
+  "model_ready": false,
+  "model_metrics": {},
+  "n_train_samples": null,
+  "mae_min": null,
+  "baseline_mae_min": null,
+  "model_trained_at": null,
+  "n_calls": 20,
+  "latency_ms": {
+    "p50": 522.3,
+    "p90": 570.7,
+    "p95": 578.9
+  },
+  "pct_model": 0.0,
+  "pct_fallback": 100.0,
+  "mean_eta_min": 35.0,
+  "source_breakdown": {
+    "fallback_constant": 20
+  }
+}

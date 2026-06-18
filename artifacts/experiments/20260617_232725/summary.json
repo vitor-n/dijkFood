@@ -1,0 +1,303 @@
+{
+  "meta": {
+    "generated_at": "2026-06-18T02:27:25.574398+00:00",
+    "branch": "improve-latency",
+    "base_url": "http://dijkfood-g3-dev-alb-365502577.us-east-1.elb.amazonaws.com",
+    "prediction_url": "http://dijkfood-g3-dev-alb-365502577.us-east-1.elb.amazonaws.com",
+    "duration_per_scenario_s": 20
+  },
+  "load": {
+    "scenarios": {
+      "normal": {
+        "status": "OK",
+        "rps_nominal": 10.0,
+        "orders_created": 204,
+        "orders_completed": 204,
+        "orders_failed": 0,
+        "orders_not_created": 0,
+        "requests_total": 13849,
+        "success_rate_pct": 100.0,
+        "http_errors": 0,
+        "net_errors": 0,
+        "wall_seconds": 75.8,
+        "throughput_req_s": 182.7,
+        "global_p50": 136.01050002034754,
+        "global_p90": 170.11110007297248,
+        "global_p95": 259.16010001674294,
+        "order_p50": 189.78070002049208,
+        "order_p90": 279.7339499811642,
+        "order_p95": 565.7337500015274,
+        "track_p50": 135.9461999963969,
+        "track_p90": 157.3623799951747,
+        "track_p95": 250.54002999095246,
+        "route_p50": 137.85210001515225,
+        "route_p90": 176.01664998801425,
+        "route_p95": 177.18594998586923,
+        "bottleneck_endpoint": "GET /restaurants/{id}",
+        "bottleneck_p95": 1838.1,
+        "sla_p95_violations": [
+          "POST /order"
+        ],
+        "sla_met": false
+      },
+      "peak": {
+        "status": "OK",
+        "rps_nominal": 50.0,
+        "orders_created": 981,
+        "orders_completed": 970,
+        "orders_failed": 11,
+        "orders_not_created": 0,
+        "requests_total": 66188,
+        "success_rate_pct": 99.89,
+        "http_errors": 72,
+        "net_errors": 119,
+        "wall_seconds": 134.5,
+        "throughput_req_s": 492.1,
+        "global_p50": 383.5095999529585,
+        "global_p90": 1438.6855000513606,
+        "global_p95": 2706.193920056103,
+        "order_p50": 196.988100069575,
+        "order_p90": 3786.225159955211,
+        "order_p95": 4753.830850007944,
+        "track_p50": 404.08989996649325,
+        "track_p90": 1303.6058900295757,
+        "track_p95": 2323.6877500545233,
+        "route_p50": 151.4842000324279,
+        "route_p90": 202.8855200158432,
+        "route_p95": 234.06067996984348,
+        "bottleneck_endpoint": "GET /restaurants/{id}",
+        "bottleneck_p95": 5498.3,
+        "sla_p95_violations": [
+          "global",
+          "POST /order",
+          "POST /tracking/position"
+        ],
+        "sla_met": false
+      },
+      "event": {
+        "status": "OK",
+        "rps_nominal": 200.0,
+        "orders_created": 563,
+        "orders_completed": 280,
+        "orders_failed": 283,
+        "orders_not_created": 3184,
+        "requests_total": 22851,
+        "success_rate_pct": 89.25,
+        "http_errors": 2457,
+        "net_errors": 11973,
+        "wall_seconds": 213.8,
+        "throughput_req_s": 106.9,
+        "global_p50": 186.52540002949536,
+        "global_p90": 10251.486319978721,
+        "global_p95": 10263.624579971656,
+        "order_p50": 10260.299999965355,
+        "order_p90": 10654.252699925564,
+        "order_p95": 19610.699499957263,
+        "track_p50": 175.2013000077568,
+        "track_p90": 335.0954099674709,
+        "track_p95": 446.47760001244023,
+        "route_p50": 140.03909996245056,
+        "route_p90": 179.92988002952188,
+        "route_p95": 188.3075200021267,
+        "bottleneck_endpoint": "POST /order",
+        "bottleneck_p95": 19610.7,
+        "sla_p95_violations": [
+          "global",
+          "POST /order"
+        ],
+        "sla_met": false
+      }
+    },
+    "status": "OK"
+  },
+  "analytics": {
+    "order_created_events": 2993,
+    "order_state_events": 10330,
+    "courier_position_events": 1753089,
+    "total_events": 1785412,
+    "first_event_at": "2026-06-18T01:36:43.495631+00:00",
+    "last_event_at": "2026-06-18T02:32:35.221393+00:00",
+    "status": "OK",
+    "notes": ""
+  },
+  "eta": {
+    "status": "OK",
+    "model_info": {
+      "ready": false,
+      "fallback_minutes": 35.0
+    },
+    "health": {
+      "http": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    "calls": [
+      {
+        "id_restaurant": 1,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 520.5
+      },
+      {
+        "id_restaurant": 2,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 531.7
+      },
+      {
+        "id_restaurant": 3,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 531.4
+      },
+      {
+        "id_restaurant": 4,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 519.8
+      },
+      {
+        "id_restaurant": 5,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 512.2
+      },
+      {
+        "id_restaurant": 6,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 535.0
+      },
+      {
+        "id_restaurant": 7,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 548.5
+      },
+      {
+        "id_restaurant": 8,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 539.5
+      },
+      {
+        "id_restaurant": 9,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 552.0
+      },
+      {
+        "id_restaurant": 10,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 514.2
+      },
+      {
+        "id_restaurant": 11,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 579.2
+      },
+      {
+        "id_restaurant": 12,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 506.5
+      },
+      {
+        "id_restaurant": 13,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 545.1
+      },
+      {
+        "id_restaurant": 14,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 501.3
+      },
+      {
+        "id_restaurant": 15,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 514.5
+      },
+      {
+        "id_restaurant": 16,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 501.4
+      },
+      {
+        "id_restaurant": 17,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 504.5
+      },
+      {
+        "id_restaurant": 18,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 572.8
+      },
+      {
+        "id_restaurant": 19,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 524.1
+      },
+      {
+        "id_restaurant": 20,
+        "eta_minutes": 35.0,
+        "source": "fallback_constant",
+        "latency_ms": 519.0
+      }
+    ],
+    "model_ready": false,
+    "model_metrics": {},
+    "n_train_samples": null,
+    "mae_min": null,
+    "baseline_mae_min": null,
+    "model_trained_at": null,
+    "n_calls": 20,
+    "latency_ms": {
+      "p50": 522.3,
+      "p90": 570.7,
+      "p95": 578.9
+    },
+    "pct_model": 0.0,
+    "pct_fallback": 100.0,
+    "mean_eta_min": 35.0,
+    "source_breakdown": {
+      "fallback_constant": 20
+    }
+  },
+  "resilience": {
+    "test_a": {
+      "created": 4,
+      "attempted": 5,
+      "eta_sources": {
+        "fallback_constant": 4
+      },
+      "errors": [
+        "HTTP 404: {'detail': 'Nenhum entregador disponível'}"
+      ],
+      "success_rate_pct": 80.0
+    },
+    "test_b": {
+      "method": "replica_da_logica_do_order_service",
+      "unreachable_endpoint": "http://127.0.0.1:9/predict/eta",
+      "eta_timeout_s": 0.4,
+      "result": {
+        "eta_minutes": 35.0,
+        "source": "fallback"
+      },
+      "fallback_ok": true,
+      "live_order_still_created": true,
+      "live_order_eta_source": "fallback_constant"
+    },
+    "status": "OK"
+  },
+  "synthesis": "Cenários executados: normal, peak, event (taxa de sucesso mín. 89.2%). A disponibilidade funcional foi preservada, mas a meta estrita de P95 < 500 ms não foi atingida em todos os endpoints/cenários (normal, peak, event). O principal gargalo observado foi POST /order (P95 19611 ms no cenário event). A camada analítica recebeu 1785412 eventos operacionais (criação de pedidos, transições de estado e posições), confirmando a persistência. O ETA permaneceu integrado ao fluxo de pedidos, mas 100% das respostas usaram fallback — confirma resiliência operacional, embora indique que o modelo ainda precisa de maior disponibilidade/pré-carregamento. A criação de pedido não depende criticamente do modelo: sob ETA indisponível, o fluxo recai em fallback determinístico sem perder o pedido."
+}

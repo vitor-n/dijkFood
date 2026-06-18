@@ -1,0 +1,10 @@
+{
+  "order_created_events": 2993,
+  "order_state_events": 10330,
+  "courier_position_events": 1753089,
+  "total_events": 1785412,
+  "first_event_at": "2026-06-18T01:36:43.495631+00:00",
+  "last_event_at": "2026-06-18T02:32:35.221393+00:00",
+  "status": "OK",
+  "notes": ""
+}
