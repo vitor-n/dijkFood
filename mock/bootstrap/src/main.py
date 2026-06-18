@@ -13,9 +13,15 @@ import time
 import httpx
 from dataclasses import dataclass, field
 import sys
+from typing import Optional
 from faker import Faker
 from dotenv import load_dotenv
-from utils import get_random_sp_coordinate, post_with_retry
+from utils import (
+    get_random_sp_coordinate,
+    get_weighted_sp_coordinate,
+    get_weighted_restaurant_coordinate,
+    post_with_retry,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -26,6 +32,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger("bootstrap")
+log.addHandler(logging.StreamHandler(sys.stdout))
 
 # ---------------------------------------------------------------------------
 # Configuração
@@ -53,6 +60,10 @@ config_retry = {
 
 fake = Faker("pt_BR")
 
+SILENT = os.getenv("SILENT", "false").lower() in ("true", "1", "yes")
+if SILENT:
+    logging.getLogger("httpx").setLevel(logging.ERROR)
+
 # ---------------------------------------------------------------------------
 # Resultado agregado
 # ---------------------------------------------------------------------------
@@ -78,7 +89,7 @@ class BatchResult:
 # ---------------------------------------------------------------------------
 
 async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = get_random_sp_coordinate()
+    loc = get_weighted_sp_coordinate()
     body = await post_with_retry(client, f"{BASE_URL}/users", {
         "name":  fake.name(),
         "email": fake.email(),
@@ -92,30 +103,36 @@ async def create_user(client: httpx.AsyncClient, sem: asyncio.Semaphore):
 
 
 async def create_restaurant(client: httpx.AsyncClient, sem: asyncio.Semaphore):
-    loc = get_random_sp_coordinate()
+    loc = get_weighted_restaurant_coordinate()
+    # Calcula índice H3 real a partir das coordenadas (resolução 7 ≈ 5 km²)
+    try:
+        import h3
+        h3_cell = h3.latlng_to_cell(loc["lat"], loc["lon"], 7)
+        h3_index = int(h3_cell, 16)
+    except (ImportError, Exception):
+        h3_index = random.randint(1, 1000)  # fallback se h3 não estiver instalado
     body = await post_with_retry(client, f"{BASE_URL}/restaurants", {
         "name":           fake.company(),
         "lat":            loc["lat"],
         "lon":            loc["lon"],
-        "H3_index":       random.randint(1, 1000),
+        "H3_index":       h3_index,
         "ID_cuisine_type": random.choice(CUISINE_TYPE_IDS),
     }, sem, config_retry, log)
     if body is None:
         return None
     return body.get("id_restaurant") or body.get("id")
 
+ITEMS_PER_RESTAURANT = 5
 
-# async def create_menu_item(
-#     client: httpx.AsyncClient,
-#     sem: asyncio.Semaphore,
-#     restaurant_id: int,
-# ) -> int | None:
-#     body = await post_with_retry(client, f"{BASE_URL}/menu_items", {
-#         "name":          fake.word().capitalize(),
-#         "price":         round(random.uniform(10, 100), 2),
-#         "ID_restaurant": restaurant_id,
-#     }, sem, config_retry, log)
-#     return body.get("id") if body is not None else None
+async def create_menu_item(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    restaurant_id: int,
+) -> Optional[int]:
+    body = await post_with_retry(client, f"{BASE_URL}/restaurants/{restaurant_id}/menu", {
+        "name":          fake.word().capitalize(),
+    }, sem, config_retry, log)
+    return body.get("id_item") if body is not None else None
 
 
 async def create_courier(client: httpx.AsyncClient, sem: asyncio.Semaphore):
@@ -165,15 +182,12 @@ async def ingest_batch(
 
     return result
 
-# ---------------------------------------------------------------------------
-# Bootstrap principal
-# ---------------------------------------------------------------------------
-
 async def run_bootstrap() -> dict:
     """
     Executa o bootstrap completo e retorna os IDs criados:
       {"user_ids": [...], "restaurant_ids": [...], "item_ids": {...}, "courier_ids": [...]}
     """
+    
     sem = asyncio.Semaphore(CONCURRENCY)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
     limits  = httpx.Limits(max_connections=CONCURRENCY + 10, max_keepalive_connections=CONCURRENCY)
@@ -195,28 +209,28 @@ async def run_bootstrap() -> dict:
         )
 
         # ── Itens de menu ───────────────────────────────────────────────────
-        # item_ids: dict[int, list[int]] = {}
-        # if rest_result.created:
-        #     total_items = len(rest_result.created) * ITEMS_PER_RESTAURANT
-        #     log.info(f"Criando {total_items} itens de menu ({ITEMS_PER_RESTAURANT} por restaurante)")
-        #     item_coros = [
-        #         create_menu_item(client, sem, rid)
-        #         for rid in rest_result.created
-        #         for _ in range(ITEMS_PER_RESTAURANT)
-        #     ]
-        #     # Mapeia item → restaurante para retorno estruturado
-        #     rid_per_coro = [
-        #         rid
-        #         for rid in rest_result.created
-        #         for _ in range(ITEMS_PER_RESTAURANT)
-        #     ]
-        #     item_result = await ingest_batch("menu_items", item_coros)
+        item_ids: dict[int, list[int]] = {}
+        if rest_result.created:
+            total_items = len(rest_result.created) * ITEMS_PER_RESTAURANT
+            log.info(f"Criando {total_items} itens de menu ({ITEMS_PER_RESTAURANT} por restaurante)")
+            item_coros = [
+                create_menu_item(client, sem, rid)
+                for rid in rest_result.created
+                for _ in range(ITEMS_PER_RESTAURANT)
+            ]
+            # Mapeia item → restaurante para retorno estruturado
+            rid_per_coro = [
+                rid
+                for rid in rest_result.created
+                for _ in range(ITEMS_PER_RESTAURANT)
+            ]
+            item_result = await ingest_batch("menu_items", item_coros)
 
-        #     for rid, item_id in zip(rid_per_coro, item_result.created):
-        #         item_ids.setdefault(rid, []).append(item_id)
-        # else:
-        #     log.warning("Nenhum restaurante criado — pulando itens de menu.")
-        #     item_result = BatchResult("menu_items")
+            for rid, item_id in zip(rid_per_coro, item_result.created):
+                item_ids.setdefault(rid, []).append(item_id)
+        else:
+            log.warning("Nenhum restaurante criado — pulando itens de menu.")
+            item_result = BatchResult("menu_items")
 
         # ── Entregadores ────────────────────────────────────────────────────
         log.info(f"Criando {NUM_COURIERS} entregadores")
@@ -236,7 +250,7 @@ async def run_bootstrap() -> dict:
     return {
         "user_ids":       user_result.created,
         "restaurant_ids": rest_result.created,
-        # "item_ids":       item_ids,          # {restaurant_id: [item_id, ...]}
+        "item_ids":       item_ids,          # {restaurant_id: [item_id, ...]}
         "courier_ids":    courier_result.created,
     }
 

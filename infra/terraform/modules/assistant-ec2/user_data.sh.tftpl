@@ -1,0 +1,36 @@
+#!/bin/bash
+set -x
+dnf install -y docker
+systemctl enable --now docker
+
+cat >/usr/local/bin/run-assistant.sh <<'SCRIPT'
+#!/bin/bash
+set -e
+IMAGE="${image}:latest"
+REGION="${region}"
+REG_HOST="$(echo "$IMAGE" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REG_HOST"
+docker pull "$IMAGE"
+docker rm -f assistant 2>/dev/null || true
+docker run -d --name assistant --restart unless-stopped -p 8006:8006 \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="/ec2/dijkfood-assistant" \
+  --log-opt awslogs-create-group=true \
+  -e AWS_REGION="$REGION" -e AWS_DEFAULT_REGION="$REGION" \
+  -e GLUE_DATABASE="${glue_db}" \
+  -e ATHENA_WORKGROUP="${athena_wg}" \
+  -e DATALAKE_BUCKET="${bucket}" \
+  -e USE_BEDROCK="${use_bedrock}" \
+  -e BEDROCK_REGION="${bedrock_region}" \
+  -e BEDROCK_MODEL_ID="${bedrock_model_id}" \
+  -e BEDROCK_AWS_ACCESS_KEY_ID="${bedrock_access_key}" \
+  -e BEDROCK_AWS_SECRET_ACCESS_KEY="${bedrock_secret_key}" \
+  "$IMAGE"
+SCRIPT
+chmod +x /usr/local/bin/run-assistant.sh
+
+for i in $(seq 1 60); do
+  /usr/local/bin/run-assistant.sh && exit 0
+  sleep 30
+done

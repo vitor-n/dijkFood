@@ -64,3 +64,61 @@ output "load_tester_instance_id" {
   value       = module.load_tester.instance_id
 }
 
+# ──────────────────────────────────────────────
+#  Camada analítica / Objetivo 3
+# ──────────────────────────────────────────────
+
+output "datalake_bucket_name" {
+  description = "Bucket S3 do datalake (Firehose, modelos, previsões, catálogo semântico)"
+  value       = module.datalake.datalake_bucket_name
+}
+
+output "glue_database_name" {
+  description = "Database do Glue Data Catalog"
+  value       = module.datalake.glue_database_name
+}
+
+output "athena_workgroup_name" {
+  description = "Workgroup do Athena"
+  value       = module.datalake.athena_workgroup_name
+}
+
+output "dashboard_instance_id" {
+  description = "ID da EC2 que hospeda o dashboard"
+  value       = module.dashboard_ec2.instance_id
+}
+
+output "prediction_service_name" {
+  value = module.prediction_service.service_name
+}
+
+output "assistant_instance_id" {
+  description = "ID da EC2 que hospeda o assistente"
+  value       = module.assistant_ec2.instance_id
+}
+
+output "dashboard_url" {
+  description = "URL do dashboard analítico (EC2 dedicada)"
+  value       = module.dashboard_ec2.url
+}
+
+output "assistant_url" {
+  description = "URL do assistente conversacional"
+  value       = "${module.alb.dns_name}/chat"
+}
+
+output "ml_state_machine_arn" {
+  description = "Step Functions de retreino do ETA (null se a pipeline estiver desligada)"
+  value       = one(module.ml_pipeline[*].state_machine_arn)
+}
+
+output "position_forwarder_pipe" {
+  description = "Pipe de CDC das posições (DynamoDB Streams → Firehose)"
+  value       = module.position_forwarder.pipe_name
+}
+
+output "outbox_publisher_lambda" {
+  description = "Lambda relay do outbox transacional (RDS → Firehose)"
+  value       = module.position_forwarder.outbox_publisher_name
+}
+

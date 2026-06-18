@@ -5,3 +5,4 @@ pydantic
 python-dotenv
 sqlalchemy
 uvicorn[standard]
+aioboto3

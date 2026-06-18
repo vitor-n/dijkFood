@@ -6,6 +6,9 @@ cache/
 .venv
 .env
 
+*.zip
+*.txt
+
 # Terraform
 .terraform/
 *.tfstate
@@ -18,7 +21,10 @@ infra/terraform/*.tfvars.json
 # Graph data (large binary)
 data/
 *.pkl
+polygon_sp.json
 
 # OS
 .DS_Store
 Thumbs.db
+
+plots

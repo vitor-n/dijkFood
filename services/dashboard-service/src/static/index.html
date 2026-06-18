@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DijkFood · Dashboard Analítico</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --bg-soft: #111726;
+    --panel: rgba(23, 31, 48, 0.72);
+    --panel-border: rgba(125, 145, 190, 0.14);
+    --text: #e8edf7;
+    --text-dim: #93a0bd;
+    --text-faint: #5e6b87;
+    --accent: #34e3b0;
+    --accent-2: #7c8cff;
+    --accent-3: #ff8fb1;
+    --accent-4: #ffd166;
+    --danger: #ff6b6b;
+    --shadow: 0 18px 50px -22px rgba(0, 0, 0, 0.75);
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 600px at 12% -8%, rgba(52, 227, 176, 0.10), transparent 60%),
+      radial-gradient(1000px 620px at 95% 0%, rgba(124, 140, 255, 0.12), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100%;
+    padding: 0 0 60px;
+  }
+
+  /* ── Header ── */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(14px);
+    background: linear-gradient(180deg, rgba(11,15,26,0.92), rgba(11,15,26,0.55));
+    border-bottom: 1px solid var(--panel-border);
+    padding: 18px 32px;
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 13px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-weight: 800; font-size: 20px; color: #08111a;
+    box-shadow: 0 8px 24px -8px rgba(52, 227, 176, 0.6);
+  }
+  .brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
+  .brand p { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .spacer { flex: 1; }
+  .meta { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .meta .item { text-align: right; }
+  .meta .item .k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); }
+  .meta .item .v { font-size: 13px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; color: var(--text-dim);
+    background: rgba(52, 227, 176, 0.08);
+    border: 1px solid rgba(52, 227, 176, 0.22);
+    padding: 7px 13px; border-radius: 999px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgba(52,227,176,.6); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(52,227,176,.5)} 70%{box-shadow:0 0 0 10px rgba(52,227,176,0)} 100%{box-shadow:0 0 0 0 rgba(52,227,176,0)} }
+  button.refresh {
+    font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+    background: rgba(124, 140, 255, 0.12); border: 1px solid rgba(124, 140, 255, 0.3);
+    padding: 9px 16px; border-radius: 11px; cursor: pointer; transition: .18s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  button.refresh:hover { background: rgba(124, 140, 255, 0.22); transform: translateY(-1px); }
+  button.refresh:active { transform: translateY(0); }
+  button.refresh.loading svg { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  main { max-width: 1480px; margin: 0 auto; padding: 28px 32px; }
+
+  /* ── KPI cards ── */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); gap: 16px; margin-bottom: 26px; }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
+    padding: 18px 20px; position: relative; overflow: hidden; box-shadow: var(--shadow);
+  }
+  .kpi::before { content:""; position:absolute; inset:0; background: linear-gradient(135deg, var(--c1, transparent), transparent 42%); opacity:.5; pointer-events:none; }
+  .kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-faint); display:flex; align-items:center; gap:8px; }
+  .kpi .value { font-size: 30px; font-weight: 800; letter-spacing: -1px; margin-top: 10px; line-height: 1; }
+  .kpi .value small { font-size: 14px; font-weight: 600; color: var(--text-dim); margin-left: 3px; }
+  .kpi .sub { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+  .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; }
+
+  /* ── Chart grid ── */
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 18px 18px 8px; min-height: 320px; position: relative;
+  }
+  .card h3 { font-size: 14px; font-weight: 600; letter-spacing: -.1px; display:flex; align-items:center; gap:9px; }
+  .card h3 .bar { width: 4px; height: 15px; border-radius: 3px; background: var(--accent); }
+  .card .hint { font-size: 11.5px; color: var(--text-faint); margin: 3px 0 4px 13px; }
+  .card .plot { width: 100%; height: 260px; }
+  .col-12 { grid-column: span 12; } .col-8 { grid-column: span 8; }
+  .col-6 { grid-column: span 6; } .col-5 { grid-column: span 5; }
+  .col-7 { grid-column: span 7; } .col-4 { grid-column: span 4; }
+  @media (max-width: 1080px) { .col-8,.col-6,.col-5,.col-7,.col-4 { grid-column: span 12; } }
+
+  .empty { position:absolute; inset:46px 0 0; display:grid; place-items:center; color: var(--text-faint); font-size: 13px; text-align:center; pointer-events:none; }
+  .banner { display:none; background: rgba(255,107,107,.1); border:1px solid rgba(255,107,107,.35); color:#ffb4b4; padding:12px 16px; border-radius:12px; margin-bottom:18px; font-size:13px; }
+  .skeleton { position:absolute; inset:46px 14px 16px; border-radius:12px; background: linear-gradient(100deg, rgba(255,255,255,.02) 30%, rgba(255,255,255,.06) 50%, rgba(255,255,255,.02) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  footer { text-align:center; color: var(--text-faint); font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo">D</div>
+      <div>
+        <h1>DijkFood · Dashboard Analítico</h1>
+        <p>Objetivo 3 · Arquitetura Lambda — marts Parquet (batch) + eventos crus (speed) sobre o lake</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="meta">
+      <span class="pill"><span class="dot"></span> lake durável · near-real-time</span>
+      <div class="item"><div class="k">Speed (tempo real)</div><div class="v" id="lookback">—</div></div>
+      <div class="item"><div class="k">Atualizado</div><div class="v" id="updated">—</div></div>
+      <a class="refresh" href="__ASSISTANT_URL__" style="text-decoration:none;color:var(--text);background:rgba(52,227,176,.12);border-color:rgba(52,227,176,.3)">
+        💬 Assistente
+      </a>
+      <button class="refresh" id="refreshBtn" onclick="load()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        Atualizar
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <div class="banner" id="banner"></div>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="grid">
+      <div class="card col-8">
+        <h3><span class="bar"></span> Volume de pedidos no tempo</h3>
+        <div class="hint">Pedidos criados por hora · batch (mart horário) + hora corrente em tempo real</div>
+        <div class="plot" id="c_volume"></div>
+      </div>
+      <div class="card col-4">
+        <h3><span class="bar" style="background:var(--accent-2)"></span> Pedidos abertos por estado</h3>
+        <div class="hint">Snapshot da operação (último estado &lt; Entregue)</div>
+        <div class="plot" id="c_open"></div>
+      </div>
+
+      <div class="card col-7">
+        <h3><span class="bar" style="background:var(--accent-3)"></span> Heatmap de demanda</h3>
+        <div class="hint">Pedidos por dia da semana × hora do dia</div>
+        <div class="plot" id="c_heatmap"></div>
+      </div>
+      <div class="card col-5">
+        <h3><span class="bar" style="background:var(--accent-4)"></span> Tempo médio em cada estado</h3>
+        <div class="hint">Minutos médios por etapa do ciclo de vida</div>
+        <div class="plot" id="c_states"></div>
+      </div>
+
+      <div class="card col-6">
+        <h3><span class="bar"></span> Top 10 restaurantes por volume</h3>
+        <div class="hint">Restaurantes com mais pedidos na janela</div>
+        <div class="plot" id="c_top"></div>
+      </div>
+      <div class="card col-6">
+        <h3><span class="bar" style="background:var(--accent-2)"></span> Histograma do tempo de entrega</h3>
+        <div class="hint">Distribuição do tempo total (criação → entrega), bins de 5 min</div>
+        <div class="plot" id="c_hist"></div>
+      </div>
+
+      <div class="card col-12">
+        <h3><span class="bar" style="background:var(--accent-3)"></span> Distribuição de pedidos por região</h3>
+        <div class="hint">Volume por célula H3 do restaurante</div>
+        <div class="plot" id="c_region" style="height:280px"></div>
+      </div>
+    </section>
+
+    <h2 style="margin:34px 0 4px;font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px">
+      <span style="width:6px;height:20px;border-radius:3px;background:linear-gradient(var(--accent2),var(--accent-3));display:inline-block"></span>
+      Camada Preditiva
+      <span style="font-size:12px;font-weight:500;color:var(--text-faint)">— previsão de demanda &amp; detecção de anomalias (SageMaker + batch)</span>
+    </h2>
+
+    <section class="grid">
+      <div class="card col-7">
+        <h3><span class="bar" style="background:var(--accent-2)"></span> Previsão de demanda — próximas 24h</h3>
+        <div class="hint">Forecast seasonal-naive por região × hora · <span id="pred_ts">—</span></div>
+        <div class="plot" id="c_forecast"></div>
+      </div>
+      <div class="card col-5">
+        <h3><span class="bar" style="background:var(--danger)"></span> Anomalias operacionais</h3>
+        <div class="hint">Picos de demanda (z-score) e entregas lentas (MAD)</div>
+        <div id="anomalies" style="margin-top:12px;display:flex;flex-direction:column;gap:9px;max-height:240px;overflow-y:auto"></div>
+      </div>
+    </section>
+
+    <footer>DijkFood A2 · Computação em Nuvem · FGV EMAp — camada analítica + preditiva + conversacional sobre os eventos da operação</footer>
+  </main>
+
+<script>
+const FONT = { family: "Inter, sans-serif", color: "#93a0bd", size: 12 };
+const PALETTE = ["#34e3b0","#7c8cff","#ff8fb1","#ffd166","#5ad1ff","#b89cff","#ffa86b","#7ef0c0"];
+const BASE_LAYOUT = {
+  paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+  font: FONT, margin: { l: 52, r: 18, t: 10, b: 40 },
+  xaxis: { gridcolor: "rgba(125,145,190,.10)", zerolinecolor: "rgba(125,145,190,.18)", linecolor: "rgba(125,145,190,.18)" },
+  yaxis: { gridcolor: "rgba(125,145,190,.10)", zerolinecolor: "rgba(125,145,190,.18)" },
+  hoverlabel: { bgcolor: "#171f30", bordercolor: "rgba(125,145,190,.3)", font: { family: "Inter", color: "#e8edf7" } },
+  showlegend: false,
+};
+const CFG = { displayModeBar: false, responsive: true };
+
+const KPI_DEFS = [
+  { key: "total_orders",       label: "Pedidos totais",      c: "#34e3b0", icon: "📦", fmt: v => fmtInt(v) },
+  { key: "orders_last_hour",   label: "Na última hora",      c: "#7c8cff", icon: "⚡", fmt: v => fmtInt(v) },
+  { key: "avg_delivery_min",   label: "Entrega média",       c: "#ffd166", icon: "⏱", fmt: v => v==null?"—":v, unit: "min" },
+  { key: "delivered_orders",   label: "Entregues",           c: "#5ad1ff", icon: "✅", fmt: v => fmtInt(v) },
+  { key: "open_orders",        label: "Em andamento",        c: "#ff8fb1", icon: "🔄", fmt: v => fmtInt(v) },
+  { key: "active_couriers",    label: "Entregadores ativos", c: "#b89cff", icon: "🛵", fmt: v => fmtInt(v), subKey: "available_couriers", subLabel: "disponíveis" },
+];
+
+function fmtInt(v){ return (v==null?0:v).toLocaleString("pt-BR"); }
+
+let COURIER_WIN = 30; // min — janela "entregador ativo" (vinda da API)
+
+function renderKpis(k){
+  const host = document.getElementById("kpis");
+  host.innerHTML = KPI_DEFS.map(d => {
+    const val = d.fmt(k[d.key]);
+    const unit = d.unit ? `<small>${d.unit}</small>` : "";
+    let subTxt = d.subKey != null ? `${fmtInt(k[d.subKey])} ${d.subLabel}` : "";
+    if (d.key === "active_couriers") subTxt += ` · últimos ${COURIER_WIN} min`;
+    const sub = subTxt ? `<div class="sub">${subTxt}</div>` : "";
+    return `<div class="kpi" style="--c1:${d.c}22">
+      <div class="label"><span class="ic" style="background:${d.c}1f">${d.icon}</span>${d.label}</div>
+      <div class="value">${val}${unit}</div>${sub}
+    </div>`;
+  }).join("");
+}
+
+function empty(id, msg){
+  const el = document.getElementById(id);
+  Plotly.purge(el);
+  el.innerHTML = `<div class="empty">${msg || "Sem dados ainda — gere carga para popular o lake."}</div>`;
+}
+
+function plot(id, traces, layoutExtra){
+  const el = document.getElementById(id);
+  // Se não for um gráfico Plotly ativo (ex: estava com a div de empty), nós limpamos o HTML
+  if (!el.classList.contains('js-plotly-plot')) {
+    el.innerHTML = "";
+  }
+  Plotly.react(el, traces, Object.assign({}, structuredClone(BASE_LAYOUT), layoutExtra||{}), CFG);
+}
+
+function renderVolume(d){
+  if(!d.x || !d.x.length) return empty("c_volume");
+  plot("c_volume", [{
+    x: d.x, y: d.y, type: "scatter", mode: "lines", fill: "tozeroy",
+    line: { color: "#34e3b0", width: 2.4, shape: "spline" },
+    fillcolor: "rgba(52,227,176,.12)", hovertemplate: "%{x}<br><b>%{y}</b> pedidos<extra></extra>",
+  }], { yaxis: { gridcolor:"rgba(125,145,190,.10)", title:{text:"pedidos", font:{size:11}} } });
+}
+
+function renderOpen(d){
+  if(!d.labels || !d.labels.length) return empty("c_open", "Nenhum pedido em andamento.");
+  plot("c_open", [{
+    labels: d.labels, values: d.orders, type: "pie", hole: .62,
+    marker: { colors: PALETTE, line: { color: "#0b0f1a", width: 2 } },
+    textinfo: "value", textfont: { color: "#e8edf7", size: 13 },
+    hovertemplate: "<b>%{label}</b><br>%{value} pedidos (%{percent})<extra></extra>",
+  }], { margin:{l:10,r:10,t:10,b:10}, showlegend:true, legend:{ font:{size:11}, orientation:"v", x:1, y:.5 } });
+}
+
+function renderHeatmap(d){
+  if(!d.z || !d.z.length) return empty("c_heatmap");
+  plot("c_heatmap", [{
+    z: d.z, x: d.hours, y: d.dow, type: "heatmap",
+    colorscale: [[0,"#111726"],[.25,"#1c3a5e"],[.5,"#2a7fb8"],[.75,"#34c3b0"],[1,"#34e3b0"]],
+    hovertemplate: "%{y} · %{x}h<br><b>%{z}</b> pedidos<extra></extra>",
+    colorbar: { thickness: 10, outlinewidth: 0, tickfont: { size: 10 }, len: .9 },
+  }], { margin:{l:42,r:18,t:10,b:36}, xaxis:{ title:{text:"hora", font:{size:11}}, dtick:2, gridcolor:"transparent" }, yaxis:{ gridcolor:"transparent" } });
+}
+
+function renderStates(d){
+  if(!d.labels || !d.labels.length) return empty("c_states");
+  plot("c_states", [{
+    x: d.minutes, y: d.labels, type: "bar", orientation: "h",
+    marker: { color: d.minutes.map((_,i)=>PALETTE[i%PALETTE.length]), line:{width:0} },
+    hovertemplate: "<b>%{y}</b><br>%{x} min<extra></extra>",
+  }], { margin:{l:120,r:16,t:8,b:36}, xaxis:{ title:{text:"minutos", font:{size:11}} }, yaxis:{ autorange:"reversed" } });
+}
+
+function renderTop(d){
+  if(!d.labels || !d.labels.length) return empty("c_top");
+  plot("c_top", [{
+    x: d.orders.slice().reverse(), y: d.labels.slice().reverse(), type: "bar", orientation: "h",
+    marker: { color: "#7c8cff", line:{width:0} },
+    hovertemplate: "<b>%{y}</b><br>%{x} pedidos<extra></extra>",
+  }], { margin:{l:160,r:16,t:8,b:36}, xaxis:{ title:{text:"pedidos", font:{size:11}} } });
+}
+
+function renderHist(d){
+  if(!d.bins || !d.bins.length) return empty("c_hist", "Sem entregas concluídas ainda.");
+  plot("c_hist", [{
+    x: d.bins, y: d.orders, type: "bar",
+    marker: { color: "#5ad1ff", line:{width:0} }, width: 4.4,
+    hovertemplate: "%{x}–%{customdata} min<br><b>%{y}</b> pedidos<extra></extra>",
+    customdata: d.bins.map(b => b+5),
+  }], { bargap:.06, xaxis:{ title:{text:"minutos até a entrega", font:{size:11}} }, yaxis:{ title:{text:"pedidos", font:{size:11}} } });
+}
+
+function renderRegion(d){
+  if(!d.labels || !d.labels.length) return empty("c_region");
+  plot("c_region", [{
+    x: d.labels, y: d.orders, type: "bar",
+    marker: { color: d.orders, colorscale:[[0,"#7c8cff"],[1,"#ff8fb1"]], line:{width:0} },
+    hovertemplate: "Região H3 <b>%{x}</b><br>%{y} pedidos<extra></extra>",
+  }], { margin:{l:52,r:18,t:10,b:60}, xaxis:{ title:{text:"célula H3 do restaurante", font:{size:11}}, type:"category", tickangle:-35, tickfont:{size:10} }, yaxis:{ title:{text:"pedidos", font:{size:11}} } });
+}
+
+function renderForecast(d){
+  const next = (d && d.next_24h) || [];
+  document.getElementById("pred_ts").textContent = d && d.generated_at ? ("atualizado " + new Date(d.generated_at).toLocaleTimeString("pt-BR")) : "—";
+  if(!next.length) return empty("c_forecast", "Sem previsão ainda — rode /batch/run no prediction-service.");
+  plot("c_forecast", [{
+    x: next.map(p => p.ts), y: next.map(p => p.expected_total), type: "scatter", mode: "lines+markers",
+    line: { color: "#7c8cff", width: 2.4, shape: "spline" }, fill: "tozeroy", fillcolor: "rgba(124,140,255,.12)",
+    marker: { size: 5, color: "#7c8cff" },
+    hovertemplate: "%{x}<br><b>%{y}</b> pedidos previstos<extra></extra>",
+  }], { margin:{l:48,r:16,t:10,b:40}, xaxis:{ title:{text:"próximas horas",font:{size:11}}, gridcolor:"rgba(125,145,190,.10)" }, yaxis:{ title:{text:"pedidos esperados",font:{size:11}} } });
+}
+
+function renderAnomalies(d){
+  const host = document.getElementById("anomalies");
+  const items = (d && d.anomalies) || [];
+  if(!items.length){
+    host.innerHTML = `<div style="color:var(--text-faint);font-size:13px;padding:18px 4px;text-align:center">✓ Nenhuma anomalia detectada na janela.</div>`;
+    return;
+  }
+  host.innerHTML = items.slice(0,40).map(a => {
+    const high = a.severity === "high";
+    const col = high ? "var(--danger)" : "var(--accent-4)";
+    let title, sub;
+    if(a.type === "demand_spike"){
+      title = `Pico de demanda · região ${esc(a.region)}`;
+      sub = `${a.value} pedidos (esperado ~${a.expected}, z=${a.zscore}) · ${a.at ? new Date(a.at).toLocaleString("pt-BR") : ""}`;
+    } else {
+      title = `Entregas lentas · região ${esc(a.region)}`;
+      sub = `${a.count} acima de ${a.threshold_min} min (mediana ${a.median_min} min)`;
+    }
+    return `<div style="border:1px solid var(--panel-border);border-left:3px solid ${col};border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.02)">
+      <div style="font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px">
+        <span>${title}</span>
+        <span style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:${col}">${high?"alta":"média"}</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:3px">${esc(sub)}</div>
+    </div>`;
+  }).join("");
+}
+function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function loadPredictions(){
+  try {
+    const [demand, anom] = await Promise.all([
+      fetch("/dashboard/api/demand", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
+      fetch("/dashboard/api/anomalies", {cache:"no-store"}).then(r => r.ok ? r.json() : {}),
+    ]);
+    renderForecast(demand); renderAnomalies(anom);
+  } catch(e){
+    renderForecast({}); renderAnomalies({});
+  }
+}
+
+let timer = null;
+async function load(){
+  const btn = document.getElementById("refreshBtn");
+  btn.classList.add("loading");
+  document.getElementById("banner").style.display = "none";
+  try {
+    const res = await fetch("/dashboard/api/data", { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+
+    if (d.courier_window_min) COURIER_WIN = d.courier_window_min;
+    renderKpis(d.kpis || {});
+    renderVolume(d.volume || {});
+    renderOpen(d.open_states || {});
+    renderHeatmap(d.heatmap || {});
+    renderStates(d.state_times || {});
+    renderTop(d.top_restaurants || {});
+    renderHist(d.delivery_hist || {});
+    renderRegion(d.regions || {});
+
+    document.getElementById("lookback").textContent = (d.speed_lookback_days || "—") + "d · vivos";
+    document.getElementById("updated").textContent = new Date(d.generated_at).toLocaleTimeString("pt-BR");
+  } catch (e) {
+    const b = document.getElementById("banner");
+    b.style.display = "block";
+    b.textContent = "Falha ao carregar indicadores: " + e.message + ". Verifique se há eventos no lake e se o Athena/Glue está provisionado.";
+  } finally {
+    btn.classList.remove("loading");
+  }
+  loadPredictions();
+}
+
+load();
+// auto-refresh a cada 60s
+timer = setInterval(load, 60000);
+window.addEventListener("resize", () => { /* Plotly responsive handles it */ });
+</script>
+</body>
+</html>

@@ -76,6 +76,7 @@ resource "aws_ecs_task_definition" "core_api" {
       { name = "DYNAMO_TABLE", value = var.dynamodb_table_name },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },
     ]
 
     logConfiguration = {
@@ -108,36 +109,89 @@ resource "aws_ecs_task_definition" "routing" {
   execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
 
-  container_definitions = jsonencode([{
-    name  = "routing-service"
-    image = "${var.routing_service_image}:latest"
+  container_definitions = jsonencode([
+    # ── Container 1: OSRM backend (C++) ─────────────────────────────────────
+    # Baixa os arquivos .osrm pré-processados do S3 no startup, depois sobe
+    # o servidor OSRM. O routing-service só sobe após este container passar
+    # no healthCheck (condição HEALTHY).
+    {
+      name       = "osrm-backend"
+      image      = "ghcr.io/project-osrm/osrm-backend:v5.27.1"
+      entryPoint = ["/bin/sh", "-c"]
+      command = [
+        "apt-get update -qq && apt-get install -y -qq awscli curl && mkdir -p /data && aws s3 sync s3://${var.graph_bucket_name}/osrm/processed/ /data/ && echo 'Download OSRM concluido' && osrm-routed --algorithm MLD /data/sao_paulo.osrm --port 5000 --max-table-size 10000"
+      ]
 
-    portMappings = [{ containerPort = 8001, protocol = "tcp" }]
+      environment = [
+        { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      ]
 
-    environment = [
-      { name = "GRAPH_PATH", value = "/app/data/sao_paulo.pkl" },
-      { name = "AWS_DEFAULT_REGION", value = var.aws_region },
-    ]
+      portMappings = [{ containerPort = 5000, protocol = "tcp" }]
 
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.routing.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
+      mountPoints = [{ sourceVolume = "osrm-data", containerPath = "/data", readOnly = false }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.routing.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "osrm"
+        }
       }
-    }
 
-    healthCheck = {
-      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')\" || exit 1"]
-      interval    = 30
-      timeout     = 10
-      retries     = 3
-      startPeriod = 120
-    }
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -sf 'http://localhost:5000/route/v1/driving/-46.6388,-23.5489;-46.6588,-23.5689?overview=false' | grep -q '\"code\":\"Ok\"' || exit 1"]
+        interval    = 30
+        timeout     = 10
+        retries     = 5
+        startPeriod = 180
+      }
 
-    essential = true
-  }])
+      essential = true
+    },
+
+    # ── Container 2: routing-service FastAPI (proxy leve) ───────────────────
+    # Recebe chamadas do ALB na porta 8001 e as repassa ao osrm-backend
+    # via localhost:5000. Só sobe após osrm-backend estar HEALTHY.
+    {
+      name  = "routing-service"
+      image = "${var.routing_service_image}:latest"
+
+      portMappings = [{ containerPort = 8001, protocol = "tcp" }]
+
+      environment = [
+        { name = "OSRM_URL", value = "http://localhost:5000" },
+        { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      ]
+
+      dependsOn = [{ containerName = "osrm-backend", condition = "HEALTHY" }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.routing.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+
+      healthCheck = {
+        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')\" || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 210
+      }
+
+      essential = true
+    }
+  ])
+
+  volume {
+    name = "osrm-data"
+    # Volume efêmero compartilhado entre os dois containers da task.
+    # O osrm-backend popula /data/ via aws s3 sync no startup.
+  }
 }
 
 # ──────────────────────────────────────────────
@@ -252,7 +306,7 @@ resource "aws_appautoscaling_policy" "core_api_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.core_api_alb_resource_label
     }
-    target_value       = 500.0
+    target_value       = 1000
     scale_in_cooldown  = 120
     scale_out_cooldown = 30
   }
@@ -281,8 +335,8 @@ resource "aws_appautoscaling_policy" "routing_cpu" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    target_value       = 60.0
-    scale_in_cooldown  = 120
+    target_value       = 60
+    scale_in_cooldown  = 60
     scale_out_cooldown = 60
   }
 }
@@ -299,8 +353,8 @@ resource "aws_appautoscaling_policy" "routing_requests" {
       predefined_metric_type = "ALBRequestCountPerTarget"
       resource_label         = var.routing_alb_resource_label
     }
-    target_value       = 100.0
-    scale_in_cooldown  = 120
+    target_value       = 100
+    scale_in_cooldown  = 60
     scale_out_cooldown = 30
   }
 }
@@ -376,8 +430,10 @@ resource "aws_ecs_task_definition" "order" {
       { name = "POSTGRES_ENDPOINT", value = var.database_url },
       { name = "DATABASE_URL", value = var.database_url },
       { name = "TRACKING_SERVICE_ENDPOINT", value = "http://${var.alb_dns_name}/" },
+      { name = "PREDICTION_SERVICE_ENDPOINT", value = var.prediction_service_endpoint },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+      { name = "FIREHOSE_STREAM_NAME", value = var.firehose_stream_name },
     ]
 
     logConfiguration = {
@@ -490,6 +546,24 @@ resource "aws_appautoscaling_policy" "tracking_cpu" {
   }
 }
 
+resource "aws_appautoscaling_policy" "tracking_requests" {
+  name               = "${var.project_name}-tracking-alb-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.tracking.resource_id
+  scalable_dimension = aws_appautoscaling_target.tracking.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.tracking.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = var.tracking_alb_resource_label
+    }
+    target_value       = 3000
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
+
 resource "aws_appautoscaling_target" "order" {
   max_capacity       = var.order_max
   min_capacity       = var.order_min
@@ -510,6 +584,24 @@ resource "aws_appautoscaling_policy" "order_cpu" {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
     target_value       = 60.0
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_policy" "order_requests" {
+  name               = "${var.project_name}-order-alb-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.order.resource_id
+  scalable_dimension = aws_appautoscaling_target.order.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.order.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = var.order_alb_resource_label
+    }
+    target_value       = 1500
     scale_in_cooldown  = 120
     scale_out_cooldown = 60
   }

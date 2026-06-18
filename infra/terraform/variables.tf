@@ -45,20 +45,20 @@ variable "db_password" {
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t3.micro"
+  default     = "db.t3.medium"
 }
 
 variable "db_multi_az" {
   description = "Enable Multi-AZ for RDS"
   type        = bool
-  default     = true
+  default     = false # Apenas para deploys de teste. Trocar para producao.
 }
 
 # ---------- EC2 ----------
 variable "load_tester_instance_type" {
   description = "EC2 instance type to load testing"
   type        = string
-  default     = "t3.small"
+  default     = "t3.large"
 }
 
 # ---------- ECS ----------
@@ -90,19 +90,19 @@ variable "core_api_min" {
 variable "core_api_max" {
   description = "Max task count for core-api auto-scaling"
   type        = number
-  default     = 10
+  default     = 6
 }
 
 variable "routing_cpu" {
   description = "CPU units for routing-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "routing_memory" {
   description = "Memory (MiB) for routing-service task"
   type        = number
-  default     = 2048
+  default     = 4096
 }
 
 variable "routing_desired" {
@@ -114,81 +114,155 @@ variable "routing_desired" {
 variable "routing_min" {
   description = "Min task count for routing-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "routing_max" {
   description = "Max task count for routing-service auto-scaling"
   type        = number
-  default     = 6
-}
-
-variable "execution_role_arn" {
-  description = "Existing IAM execution role ARN for ECS tasks"
-  type        = string
-}
-
-variable "task_role_arn" {
-  description = "Existing IAM task role ARN for ECS tasks"
-  type        = string
+  default     = 8
 }
 
 variable "tracking_cpu" {
   description = "CPU units for tracking-service task"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "tracking_memory" {
   description = "Memory (MiB) for tracking-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "tracking_desired" {
   description = "Desired task count for tracking-service"
   type        = number
-  default     = 1
+  default     = 8
 }
 
 variable "tracking_min" {
   description = "Min task count for tracking-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 8
 }
 
 variable "tracking_max" {
   description = "Max task count for tracking-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 20
 }
 
 variable "order_cpu" {
   description = "CPU units for order-service task"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "order_memory" {
   description = "Memory (MiB) for order-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "order_desired" {
   description = "Desired task count for order-service"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 variable "order_min" {
   description = "Min task count for order-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 12
+}
+
+# ---------- Camada analítica / Objetivo 3 ----------
+
+# Dashboard roda numa EC2 dedicada.
+variable "dashboard_instance_type" {
+  description = "Tipo da EC2 que hospeda o dashboard"
+  type        = string
+  default     = "t3.small"
+}
+
+variable "prediction_cpu" {
+  type    = number
+  default = 2048
+}
+variable "prediction_memory" {
+  type    = number
+  default = 4096
+}
+variable "prediction_desired" {
+  type    = number
+  default = 1
+}
+variable "prediction_min" {
+  type    = number
+  default = 1
+}
+variable "prediction_max" {
+  type    = number
+  default = 4
+}
+
+variable "assistant_instance_type" {
+  description = "Tipo da EC2 que hospeda o assistente"
+  type        = string
+  default     = "t3.micro"
+}
+
+# ---------- Camada conversacional (Bedrock) ----------
+
+variable "assistant_use_bedrock" {
+  description = "Habilita o Bedrock no assistant-service (fallback determinístico se desabilitado/sem acesso)"
+  type        = bool
+  default     = true
+}
+
+variable "bedrock_region" {
+  description = "Região do Bedrock (pode ser conta/região distinta com acesso ao modelo)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "bedrock_model_id" {
+  description = "Model ID do Bedrock para o text-to-SQL"
+  type        = string
+  default     = "amazon.nova-micro-v1:0"
+}
+
+variable "bedrock_aws_access_key_id" {
+  description = "Chave de acesso AWS para a conta real (opcional, para usar o Bedrock cross-account)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "bedrock_aws_secret_access_key" {
+  description = "Chave secreta AWS para a conta real (opcional, para usar o Bedrock cross-account)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# ---------- Pipeline de ML ----------
+
+variable "ml_retrain_schedule" {
+  description = "Periodicidade do retreino do ETA (EventBridge Scheduler)"
+  type        = string
+  default     = "rate(1 day)"
+}
+
+variable "enable_ml_pipeline" {
+  description = "Liga a pipeline gerenciada (Step Functions + SageMaker + EventBridge + Model Registry). Desligue para deploys de teste mais rápidos/confiáveis — o ETA continua garantido pelo prediction-service no ECS."
+  type        = bool
+  default     = false
 }

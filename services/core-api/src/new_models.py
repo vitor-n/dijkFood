@@ -2,10 +2,24 @@
 Extensão de models.py com as tabelas que a core-api precisa ler/escrever
 para histórico de pedidos e menu de restaurantes.
 """
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, TIMESTAMP, BigInteger, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .models import Base
+
+
+class OutboxEvent(Base):
+    """Transactional outbox — eventos analíticos gravados junto do dado de domínio."""
+    __tablename__ = "outbox_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    entidade = Column(String(64), nullable=False)
+    acao = Column(String(32), nullable=False)
+    dados = Column(JSONB, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    published_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, server_default=text("0"))
 
 
 class OrderState(Base):
@@ -26,6 +40,7 @@ class Order(Base):
     # Relacionamentos para eager-loading conveniente
     last_state_rel = relationship("OrderState", foreign_keys=[id_last_state])
     events = relationship("OrderEvent", back_populates="order", order_by="OrderEvent.changed_at")
+    order_items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
 
 class OrderEvent(Base):
@@ -44,3 +59,14 @@ class Item(Base):
     id_item = Column("id_item", Integer, primary_key=True)
     name = Column(String(128), nullable=False)
     id_restaurant = Column("id_restaurant", Integer, ForeignKey("restaurants.id_restaurant"), nullable=False)
+
+
+class OrderItem(Base):
+    __tablename__ = "orderitems"
+    id_order_item = Column("id_order_item", Integer, primary_key=True)
+    price = Column(Numeric(100, 2), nullable=False)
+    id_item = Column("id_item", Integer, ForeignKey("items.id_item"), nullable=False)
+    id_order = Column("id_order", Integer, ForeignKey("orders.id_order"), nullable=False)
+
+    order = relationship("Order", back_populates="order_items")
+    item = relationship("Item")

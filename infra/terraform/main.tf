@@ -3,9 +3,28 @@ locals {
     "core-api",
     "routing-service",
     "tracking-service",
-    "order-service"
+    "order-service",
+    # Camada analítica / Objetivo 3
+    "dashboard-service",
+    "prediction-service",
+    "assistant-service",
   ]
   database_url = "postgresql+asyncpg://${var.db_username}:${var.db_password}@${module.rds.endpoint}:5432/dijkfood"
+
+  alb_base_url = "http://${module.alb.dns_name}"
+
+  # Ambiente comum aos serviços que consultam a camada analítica (Athena/Glue)
+  analytics_env = [
+    { name = "AWS_REGION", value = var.aws_region },
+    { name = "AWS_DEFAULT_REGION", value = var.aws_region },
+    { name = "GLUE_DATABASE", value = module.datalake.glue_database_name },
+    { name = "ATHENA_WORKGROUP", value = module.datalake.athena_workgroup_name },
+    { name = "DATALAKE_BUCKET", value = module.datalake.datalake_bucket_name },
+  ]
+}
+
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
 }
 
 # ──────────────────────────────────────────────
@@ -33,7 +52,7 @@ resource "aws_security_group" "ecs_tasks" {
   ingress {
     protocol        = "tcp"
     from_port       = 8000
-    to_port         = 8003
+    to_port         = 8006
     security_groups = [aws_security_group.alb.id]
   }
 
@@ -80,7 +99,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-rds-"
-  description = "Allow PostgreSQL from ECS tasks"
+  description = "Allow PostgreSQL from ECS tasks, Lambda, and VPC"
   vpc_id      = module.networking.vpc_id
 
   ingress {
@@ -88,6 +107,22 @@ resource "aws_security_group" "rds" {
     from_port       = 5432
     to_port         = 5432
     security_groups = [aws_security_group.ecs_tasks.id]
+  }
+
+  ingress {
+    description     = "outbox-publisher Lambda"
+    protocol        = "tcp"
+    from_port       = 5432
+    to_port         = 5432
+    security_groups = [aws_security_group.lambda.id]
+  }
+
+  ingress {
+    description = "Allow PostgreSQL from within VPC"
+    protocol    = "tcp"
+    from_port   = 5432
+    to_port     = 5432
+    cidr_blocks = [var.vpc_cidr]
   }
 
   egress {
@@ -99,6 +134,23 @@ resource "aws_security_group" "rds" {
 
   lifecycle { create_before_destroy = true }
   tags = { Name = "${var.project_name}-rds-sg" }
+}
+
+# SG da Lambda outbox-publisher (na VPC, alcança RDS + egress p/ Firehose via NAT)
+resource "aws_security_group" "lambda" {
+  name_prefix = "${var.project_name}-lambda-"
+  description = "Outbox-publisher Lambda egress"
+  vpc_id      = module.networking.vpc_id
+
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle { create_before_destroy = true }
+  tags = { Name = "${var.project_name}-lambda-sg" }
 }
 
 # ──────────────────────────────────────────────
@@ -152,6 +204,19 @@ module "dynamodb" {
 }
 
 # ──────────────────────────────────────────────
+#  Datalake (S3 + Firehose)
+# ──────────────────────────────────────────────
+module "datalake" {
+  source = "./modules/datalake"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  firehose_role_arn = data.aws_iam_role.lab_role.arn
+  glue_role_arn     = data.aws_iam_role.lab_role.arn
+}
+
+# ──────────────────────────────────────────────
 #  ALB — Application Load Balancer
 # ──────────────────────────────────────────────
 
@@ -176,8 +241,8 @@ module "ecs" {
   private_subnet_ids    = module.networking.private_subnet_ids
   ecs_security_group_id = aws_security_group.ecs_tasks.id
 
-  execution_role_arn = var.execution_role_arn
-  task_role_arn      = var.task_role_arn
+  execution_role_arn = data.aws_iam_role.lab_role.arn
+  task_role_arn      = data.aws_iam_role.lab_role.arn
 
   core_api_image         = module.ecr.repository_urls["core-api"]
   routing_service_image  = module.ecr.repository_urls["routing-service"]
@@ -191,6 +256,8 @@ module "ecs" {
 
   core_api_alb_resource_label = "${module.alb.arn_suffix}/${module.alb.core_api_target_group_arn_suffix}"
   routing_alb_resource_label  = "${module.alb.arn_suffix}/${module.alb.routing_target_group_arn_suffix}"
+  tracking_alb_resource_label = "${module.alb.arn_suffix}/${module.alb.tracking_target_group_arn_suffix}"
+  order_alb_resource_label    = "${module.alb.arn_suffix}/${module.alb.order_target_group_arn_suffix}"
 
   alb_dns_name = module.alb.dns_name
 
@@ -199,6 +266,9 @@ module "ecs" {
   dynamodb_table_arn  = module.dynamodb.courier_positions_table_arn
   graph_bucket_name   = module.s3.graph_bucket_name
   graph_bucket_arn    = module.s3.graph_bucket_arn
+
+  firehose_stream_name        = module.datalake.firehose_stream_name
+  prediction_service_endpoint = "${local.alb_base_url}/"
 
   core_api_cpu     = var.core_api_cpu
   core_api_memory  = var.core_api_memory
@@ -226,14 +296,168 @@ module "ecs" {
 }
 
 
+# ──────────────────────────────────────────────
+#  Lambda — position-forwarder (DynamoDB Streams → Firehose)
+# ──────────────────────────────────────────────
+module "position_forwarder" {
+  source = "./modules/lambda"
+
+  project_name         = var.project_name
+  lambda_role_arn      = data.aws_iam_role.lab_role.arn
+  firehose_stream_name = module.datalake.firehose_stream_name
+  firehose_stream_arn  = module.datalake.firehose_stream_arn
+  dynamodb_stream_arn  = module.dynamodb.courier_positions_stream_arn
+
+  # outbox-publisher (VPC → RDS → Firehose)
+  vpc_subnet_ids           = module.networking.private_subnet_ids
+  lambda_security_group_id = aws_security_group.lambda.id
+  db_host                  = module.rds.endpoint
+  db_name                  = "dijkfood"
+  db_user                  = var.db_username
+  db_password              = var.db_password
+}
+
+# ──────────────────────────────────────────────
+#  Dashboard — EC2 estática dedicada (sem ECS/autoscaling, baixo custo)
+# ──────────────────────────────────────────────
+module "dashboard_ec2" {
+  source = "./modules/dashboard-ec2"
+
+  project_name  = var.project_name
+  aws_region    = var.aws_region
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
+  instance_type = var.dashboard_instance_type
+  image         = module.ecr.repository_urls["dashboard-service"]
+
+  glue_database    = module.datalake.glue_database_name
+  athena_workgroup = module.datalake.athena_workgroup_name
+  datalake_bucket  = module.datalake.datalake_bucket_name
+  assistant_url    = "${local.alb_base_url}/chat"
+}
+
+# ──────────────────────────────────────────────
+#  Serviços analíticos (ECS) — Objetivo 3
+# ──────────────────────────────────────────────
+module "prediction_service" {
+  source = "./modules/app-service"
+
+  project_name = var.project_name
+  name         = "prediction-service"
+  aws_region   = var.aws_region
+  image        = module.ecr.repository_urls["prediction-service"]
+
+  container_port = 8005
+  cpu            = var.prediction_cpu
+  memory         = var.prediction_memory
+  desired_count  = var.prediction_desired
+  min_count      = var.prediction_min
+  max_count      = var.prediction_max
+
+  environment = local.analytics_env
+
+  cluster_id            = module.ecs.cluster_id
+  cluster_name          = module.ecs.cluster_name
+  execution_role_arn    = data.aws_iam_role.lab_role.arn
+  task_role_arn         = data.aws_iam_role.lab_role.arn
+  private_subnet_ids    = module.networking.private_subnet_ids
+  ecs_security_group_id = aws_security_group.ecs_tasks.id
+  vpc_id                = module.networking.vpc_id
+
+  listener_arn           = module.alb.http_listener_arn
+  listener_rule_priority = 140
+  path_patterns          = ["/predict", "/predict/*", "/train/*", "/batch/*", "/model/*"]
+}
+
+module "assistant_ec2" {
+  source = "./modules/assistant-ec2"
+
+  project_name  = var.project_name
+  aws_region    = var.aws_region
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
+  instance_type = var.assistant_instance_type
+  image         = module.ecr.repository_urls["assistant-service"]
+
+  glue_database    = module.datalake.glue_database_name
+  athena_workgroup = module.datalake.athena_workgroup_name
+  datalake_bucket  = module.datalake.datalake_bucket_name
+
+  use_bedrock        = var.assistant_use_bedrock
+  bedrock_region     = var.bedrock_region
+  bedrock_model_id   = var.bedrock_model_id
+  bedrock_access_key = var.bedrock_aws_access_key_id
+  bedrock_secret_key = var.bedrock_aws_secret_access_key
+
+  listener_arn = module.alb.http_listener_arn
+}
+
+# ──────────────────────────────────────────────
+#  Pipeline gerenciada de retreino (SageMaker + Step Functions + EventBridge)
+# ──────────────────────────────────────────────
+module "ml_pipeline" {
+  source = "./modules/ml"
+  count  = var.enable_ml_pipeline ? 1 : 0
+
+  project_name        = var.project_name
+  role_arn            = data.aws_iam_role.lab_role.arn
+  datalake_bucket     = module.datalake.datalake_bucket_name
+  glue_database       = module.datalake.glue_database_name
+  athena_workgroup    = module.datalake.athena_workgroup_name
+  prediction_url      = local.alb_base_url
+  model_package_group = one(aws_sagemaker_model_package_group.eta[*].model_package_group_name)
+
+  schedule_expression = var.ml_retrain_schedule
+}
+
+# SageMaker Model Registry — versionamento dos modelos de ETA
+resource "aws_sagemaker_model_package_group" "eta" {
+  count                           = var.enable_ml_pipeline ? 1 : 0
+  model_package_group_name        = "${var.project_name}-eta"
+  model_package_group_description = "Approved ETA prediction model versions"
+}
+
 # ──────────────────────────────────
 #  EC2 - Will host the load tester
 # ──────────────────────────────────
 
 module "load_tester" {
-  source    = "./modules/ec2"
-  vpc_id    = module.networking.vpc_id
-  subnet_id = module.networking.public_subnet_ids[0] 
+  source        = "./modules/ec2"
+  vpc_id        = module.networking.vpc_id
+  subnet_id     = module.networking.public_subnet_ids[0]
   instance_type = var.load_tester_instance_type
   alb_dns       = module.alb.dns_name
 }
+
+
+module "cloudwatch_dashboard" {
+  source = "./modules/cloudwatch-dashboard"
+
+  project_name = var.project_name
+  aws_region   = var.aws_region
+
+  ecs_cluster_name        = module.ecs.cluster_name
+  core_api_service_name   = module.ecs.core_api_service_name
+  routing_service_name    = module.ecs.routing_service_name
+  tracking_service_name   = module.ecs.tracking_service_name
+  order_service_name      = module.ecs.order_service_name
+  prediction_service_name = module.prediction_service.service_name
+
+  alb_arn_suffix       = module.alb.arn_suffix
+  core_api_tg_suffix   = module.alb.core_api_target_group_arn_suffix
+  routing_tg_suffix    = module.alb.routing_target_group_arn_suffix
+  tracking_tg_suffix   = module.alb.tracking_target_group_arn_suffix
+  order_tg_suffix      = module.alb.order_target_group_arn_suffix
+  prediction_tg_suffix = module.prediction_service.target_group_arn_suffix
+
+  dynamodb_table_name = module.dynamodb.courier_positions_table_name
+  rds_instance_id     = module.rds.instance_id
+
+  ec2_load_tester_id = module.load_tester.instance_id
+  ec2_dashboard_id   = module.dashboard_ec2.instance_id
+  ec2_assistant_id   = module.assistant_ec2.instance_id
+
+  firehose_stream_name = module.datalake.firehose_stream_name
+  lambda_outbox_name   = module.position_forwarder.outbox_publisher_name
+}
+

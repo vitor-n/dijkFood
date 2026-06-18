@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 import h3
 import aioboto3
+import botocore.exceptions
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 
 from .schemas import CourierStatus, CourierPositionUpdate, NearbyCourierRequest, StatusUpdate
@@ -29,15 +30,22 @@ async def lifespan(app: FastAPI):
     ep = (settings.DYNAMO_ENDPOINT or "").strip()
     if ep.startswith("http"):
         kwargs["endpoint_url"] = ep
+        
+    from botocore.config import Config
+    boto_config = Config(
+        max_pool_connections=200,
+        connect_timeout=5,   # evita travar o worker se o DynamoDB demorar a conectar
+        read_timeout=10,     # evita travar o worker em leituras lentas
+    )
+    kwargs["config"] = boto_config
 
     async with session.resource("dynamodb", **kwargs) as dynamo_resource:
         app.state.dynamodb = dynamo_resource
+        app.state.table = await dynamo_resource.Table(settings.DYNAMO_TABLE)
         yield
 
 async def get_courier_repo(request: Request):
-    db = request.app.state.dynamodb
-    table = await db.Table(settings.DYNAMO_TABLE)
-    return CourierRepository(table)
+    return CourierRepository(request.app.state.table)
 
 
 app = FastAPI(title="DijkFood Tracking Service", lifespan = lifespan)
@@ -67,6 +75,14 @@ async def update_status(
 ):
     try:
         await repo.update_status(req.ID_courier, req.status)
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code == "ConditionalCheckFailedException":
+            raise HTTPException(
+                status_code=409,
+                detail="Courier is no longer available"
+            )
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"message": "status captured"}

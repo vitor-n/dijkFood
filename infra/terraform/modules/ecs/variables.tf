@@ -67,6 +67,16 @@ variable "routing_alb_resource_label" {
   type        = string
 }
 
+variable "tracking_alb_resource_label" {
+  description = "ALB resource label for tracking auto-scaling (arn_suffix/tg_arn_suffix)"
+  type        = string
+}
+
+variable "order_alb_resource_label" {
+  description = "ALB resource label for order auto-scaling (arn_suffix/tg_arn_suffix)"
+  type        = string
+}
+
 variable "alb_dns_name" {
   type = string
 }
@@ -95,106 +105,86 @@ variable "graph_bucket_arn" {
 
 # core-api sizing
 variable "core_api_cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "core_api_memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "core_api_desired" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "core_api_min" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "core_api_max" {
-  type    = number
-  default = 10
+  type = number
 }
 
 # routing-service sizing
 variable "routing_cpu" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "routing_memory" {
-  type    = number
-  default = 2048
+  type = number
 }
 
 variable "routing_desired" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "routing_min" {
-  type    = number
-  default = 1
+  type = number
 }
 
 variable "routing_max" {
-  type    = number
-  default = 6
+  type = number
 }
 
 # tracking-service sizing
 variable "tracking_cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "tracking_memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "tracking_desired" {
-  type    = number
-  default = 1
+  type = number
 }
 
 variable "tracking_min" {
-  type    = number
-  default = 1
+  type = number
 }
 
 variable "tracking_max" {
-  type    = number
-  default = 2
+  type = number
 }
 
 # order-service sizing
 variable "order_cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "order_memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
 variable "order_desired" {
-  type    = number
-  default = 1
+  type = number
 }
 
 variable "order_min" {
-  type    = number
-  default = 1
+  type = number
 }
 
 variable "order_max" {
-  type    = number
-  default = 2
+  type = number
 }
 
 variable "execution_role_arn" {
@@ -205,4 +195,15 @@ variable "execution_role_arn" {
 variable "task_role_arn" {
   description = "Existing IAM role ARN for ECS application task"
   type        = string
+}
+
+variable "firehose_stream_name" {
+  description = "Nome do stream do Firehose para os serviços publicarem eventos"
+  type        = string
+}
+
+variable "prediction_service_endpoint" {
+  description = "Base URL do prediction-service (via ALB) para predição de ETA"
+  type        = string
+  default     = "http://127.0.0.1:8005/"
 }

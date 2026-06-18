@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Numeric, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,7 +36,7 @@ class Restaurant(Base):
     name = Column(String(128), nullable=False)
     lat = Column(Numeric(10, 8), nullable=False)
     lon = Column(Numeric(11, 8), nullable=False)
-    h3_index = Column("h3_index", Integer, nullable=False)
+    h3_index = Column("h3_index", BigInteger, nullable=False)
     id_cuisine_type = Column("id_cuisine_type", Integer, ForeignKey("cuisinetypes.id_cuisine_type"), nullable=False)
 
 class Courier(Base):
@@ -78,7 +78,14 @@ class CourierCreationSchema(BaseModel):
     lon: float
     id_vehicle_type: int = Field(alias="ID_vehicle_type")
 
-engine = create_async_engine(settings.POSTGRES_ENDPOINT, pool_size = 15)
+engine = create_async_engine(
+    settings.POSTGRES_ENDPOINT,
+    pool_size=10,
+    max_overflow=5,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_timeout=10,   # falha rápido em vez de acumular backlog por 30s (padrão)
+)
 print(settings.POSTGRES_ENDPOINT)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

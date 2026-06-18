@@ -1,13 +1,14 @@
--- DROP TABLE IF EXISTS OrderItems CASCADE;
--- DROP TABLE IF EXISTS OrderEvents CASCADE;
--- DROP TABLE IF EXISTS Items CASCADE;
--- DROP TABLE IF EXISTS Orders CASCADE;
--- DROP TABLE IF EXISTS OrderState CASCADE;
--- DROP TABLE IF EXISTS Courier CASCADE;
--- DROP TABLE IF EXISTS VehicleTypes CASCADE;
--- DROP TABLE IF EXISTS Restaurants CASCADE;
--- DROP TABLE IF EXISTS CuisineTypes CASCADE;
--- DROP TABLE IF EXISTS Users CASCADE;
+DROP TABLE IF EXISTS OrderItems CASCADE;
+DROP TABLE IF EXISTS OrderEvents CASCADE;
+DROP TABLE IF EXISTS Items CASCADE;
+DROP TABLE IF EXISTS Orders CASCADE;
+DROP TABLE IF EXISTS OrderState CASCADE;
+DROP TABLE IF EXISTS Courier CASCADE;
+DROP TABLE IF EXISTS VehicleTypes CASCADE;
+DROP TABLE IF EXISTS Restaurants CASCADE;
+DROP TABLE IF EXISTS CuisineTypes CASCADE;
+DROP TABLE IF EXISTS Users CASCADE;
+DROP TABLE IF EXISTS outbox_events CASCADE;
 
 CREATE TABLE Users
 (
@@ -33,7 +34,7 @@ CREATE TABLE Restaurants
   name VARCHAR(128) NOT NULL,
   lat DECIMAL(10, 8) NOT NULL,
   lon DECIMAL(11, 8) NOT NULL,
-  H3_index INT NOT NULL,
+  H3_index BIGINT NOT NULL,
   ID_cuisine_type INT NOT NULL,
   PRIMARY KEY (ID_restaurant),
   FOREIGN KEY (ID_cuisine_type) REFERENCES CuisineTypes(ID_cuisine_type)
@@ -107,3 +108,30 @@ CREATE TABLE OrderItems
   FOREIGN KEY (ID_item) REFERENCES Items(ID_item),
   FOREIGN KEY (ID_order) REFERENCES Orders(ID_order)
 );
+
+-- ───────────────────────────────────────────────────────────────────────────
+--  Transactional Outbox — durabilidade forte dos eventos analíticos.
+--  A operação grava o evento na MESMA transação do dado de domínio; um
+--  publisher (Lambda outbox-publisher) lê as linhas não publicadas e envia ao
+--  Firehose com retry. Garante que nenhum evento se perca se o Firehose falhar.
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS outbox_events
+(
+  id           BIGSERIAL PRIMARY KEY,
+  entidade     VARCHAR(64)  NOT NULL,
+  acao         VARCHAR(32)  NOT NULL,
+  dados        JSONB        NOT NULL,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ  NULL,
+  attempts     INT          NOT NULL DEFAULT 0,
+  last_error   TEXT         NULL
+);
+
+-- Índice parcial: o publisher varre apenas os pendentes (varredura barata).
+CREATE INDEX IF NOT EXISTS idx_outbox_unpublished
+  ON outbox_events (id) WHERE published_at IS NULL;
+
+CREATE INDEX idx_orders_user_created ON Orders (ID_user, created_at DESC);
+CREATE INDEX idx_order_events_order ON OrderEvents (ID_order);
+CREATE INDEX idx_items_restaurant ON Items (ID_restaurant);
+CREATE INDEX idx_orders_courier ON Orders (ID_courier);

@@ -1,0 +1,63 @@
+{
+  "Comment": "DijkFood — retreino gerenciado do modelo de ETA (coleta via Athena dentro do job, treino SageMaker, promoção + batch)",
+  "StartAt": "TrainETA",
+  "States": {
+    "TrainETA": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sagemaker:createTrainingJob.sync",
+      "Parameters": {
+        "TrainingJobName.$": "States.Format('dijkfood-eta-{}', $$.Execution.Name)",
+        "AlgorithmSpecification": {
+          "TrainingImage": "${training_image}",
+          "TrainingInputMode": "File"
+        },
+        "RoleArn": "${role_arn}",
+        "HyperParameters": {
+          "sagemaker_program": "train_eta.py",
+          "sagemaker_submit_directory": "${sourcedir_s3}"
+        },
+        "Environment": {
+          "GLUE_DATABASE": "${glue_database}",
+          "ATHENA_WORKGROUP": "${athena_workgroup}",
+          "TRAIN_LOOKBACK_DAYS": "${train_lookback_days}"
+        },
+        "OutputDataConfig": {
+          "S3OutputPath": "${output_s3}"
+        },
+        "ResourceConfig": {
+          "InstanceType": "${instance_type}",
+          "InstanceCount": 1,
+          "VolumeSizeInGB": 20
+        },
+        "StoppingCondition": {
+          "MaxRuntimeInSeconds": 3600
+        }
+      },
+      "ResultPath": "$.training",
+      "Next": "PromoteAndRefresh",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "TrainFailed"
+        }
+      ]
+    },
+    "PromoteAndRefresh": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${callback_lambda_arn}",
+        "Payload": {
+          "ModelArtifacts.$": "$.training.ModelArtifacts"
+        }
+      },
+      "End": true
+    },
+    "TrainFailed": {
+      "Type": "Fail",
+      "Error": "TrainingJobFailed",
+      "Cause": "O SageMaker Training Job de ETA falhou (ver logs)."
+    }
+  }
+}

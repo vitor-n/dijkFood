@@ -27,7 +27,7 @@ implementação estão presentes no relatório.
 
 ## Entregáveis
 
-Relatório: abrir arquivo [`Computação em Nuvem - A1.pdf`](./Computação em Nuvem - A1.pdf)
+Relatório: abrir arquivo [`Computação em Nuvem - A1.pdf`](./Computação%20em%20Nuvem%20-%20A1.pdf)
 
 ## Instruções de execução
 
@@ -92,8 +92,39 @@ no console da AWS via CloudWatch (o link para acesso direto no console d AWS
 será impresso no terminal), de forma que a saída do script não fique poluída
 com eles.
 
-Após o término da simulação, os recursos da AWS serão automaticamente destruídos,
-deixando o ambiente assim como foi encontrado anteriormente. Esse processo
-poderá **falhar** caso alguma alteração seja feita no console da AWS durante a
-execução do script, então é importante que os recursos não sejam manipulados
-via console enquanto o script estiver em execução.
+
+Após o término da simulação, os recursos da AWS serão automaticamente destruídos, deixando o ambiente assim como foi encontrado anteriormente. Esse processo poderá **falhar** caso alguma alteração seja feita no console da AWS durante a execução do script, então é importante que os recursos não sejam manipulados via console enquanto o script estiver em execução.
+
+## Camada Analítica e Integração com Amazon Bedrock
+
+O sistema conta com uma **Camada Analítica (Objetivo 3)** composta por:
+* **Dashboard Service:** API e interface operacional que exibe métricas agregadas da operação de delivery em tempo real.
+* **Assistant Service (Chatbot):** Interface conversacional que permite realizar perguntas em linguagem natural sobre a operação (ex: *"quantos pedidos foram entregues hoje?"*).
+* **Prediction Service (ETA):** Modelo preditivo de estimativa de tempo de entrega baseado em machine learning.
+
+A camada analítica consome dados estruturados em formato Parquet no S3 Data Lake através do **AWS Glue** e **Amazon Athena**.
+
+### Funcionamento do Chatbot e Fallback
+O `assistant-service` utiliza o **Amazon Bedrock** (modelo `amazon.nova-micro-v1:0` por padrão) para traduzir perguntas em linguagem natural para queries SQL (Text-to-SQL) e para sumarizar os resultados obtidos.
+
+* **Restrição do Learner Lab (AWS Academy):** O perfil padrão `LabRole` fornecido pela AWS Academy **não possui permissão** para invocar modelos no Amazon Bedrock.
+* **Fallback Determinístico:** Para contornar essa restrição sem quebrar a aplicação, o chatbot possui um motor determinístico (`fallback.py`). Se a chamada ao Bedrock falhar por permissão, o chatbot reconhece padrões comuns de perguntas via expressão regular, gera a query SQL correspondente e retorna os dados reais consultados no Athena/S3 de forma transparente.
+
+### Configurando o Bedrock via Conta Real (Modo Híbrido)
+Se você possui uma conta AWS real com acesso ao Bedrock e quer utilizá-la em conjunto com a infraestrutura rodando no Learner Lab da AWS Academy:
+
+1. **Crie um IAM User na sua conta real** com permissões para invocar modelos no Bedrock (ex: anexe a política `AmazonBedrockFullAccess`).
+2. **Gere chaves de acesso (Access Key e Secret Key)** para esse usuário.
+3. No seu terminal, exporte as credenciais da conta real como variáveis de ambiente do Terraform:
+   ```bash
+   export TF_VAR_bedrock_aws_access_key_id="SUA_ACCESS_KEY_DA_CONTA_REAL"
+   export TF_VAR_bedrock_aws_secret_access_key="SUA_SECRET_KEY_DA_CONTA_REAL"
+   export TF_VAR_bedrock_region="us-east-1"                 # Região onde o modelo está ativo
+   export TF_VAR_bedrock_model_id="amazon.nova-micro-v1:0"  # ID do modelo liberado
+   ```
+4. Execute o deploy (`python deploy.py update` ou `deploy`).
+
+> **⚠️ AVISO DE CUSTOS:** Como os modelos de linguagem são tarifados por token na conta real, **monitore rigorosamente o consumo** no painel de Billing da AWS para não estourar o orçamento do seu grupo (ex: limite de $10 USD). É recomendável configurar o AWS Budgets para receber alertas automáticos de gasto.
+
+*Nota: Esse design mantém as consultas do Athena locais na AWS Academy utilizando a role nativa do contêiner, e redireciona de forma isolada apenas as chamadas do LLM (Bedrock) para a conta real usando as chaves informadas.*
+

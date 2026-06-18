@@ -1,65 +1,91 @@
 import os
-import pickle
-import numpy as np
+import httpx
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
-from sklearn.neighbors import BallTree
-from pathlib import Path
-
-import osmnx as ox
-import networkx as nx
-from fastapi import FastAPI, HTTPException
-
-app = FastAPI(title="DijkFood Routing Service")
-
-@app.get("/healthz", tags=["ops"])
-async def healthz():
-    return {"status": "ok"}
 
 
-@app.get("/routes/healthz", tags=["ops"])
-async def routes_healthz():
-    return {"status": "ok"}
+OSRM_URL = os.getenv("OSRM_URL", "http://localhost:5000")
 
-# DEFAULT_GRAPH_PATH = Path(__file__).resolve().parent.parent / "data" / "sao_paulo.pkl"
-GRAPH_PATH = "/app/data/sao_paulo.pkl"
 
-with open(GRAPH_PATH, "rb") as f:
-    G = pickle.load(f)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    limits = httpx.Limits(max_keepalive_connections=100, max_connections=500)
+    app.state.client = httpx.AsyncClient(
+        base_url=OSRM_URL,
+        timeout=10.0,
+        limits=limits,
+    )
+    yield
+    await app.state.client.aclose()
+
+
+app = FastAPI(title="DijkFood Routing Service", lifespan=lifespan)
+
+
+def get_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.client
+
+
+# ── Modelos ──────────────────────────────────────────────────────────────────
 
 class RouteRequest(BaseModel):
     orig_lat: float
     orig_lon: float
-    
     dest_lat: float
     dest_lon: float
+
 
 class RouteResponse(BaseModel):
     distance_meters: float
     estimated_time_seconds: float
-    path_nodes: list[list[float, float]]
+    path_nodes: list[list[float]]
 
-nodes_data = ox.graph_to_gdfs(G, edges=False)
-node_ids = nodes_data.index.tolist()
-coords_radians = np.radians(nodes_data[["y", "x"]].values)
-spatial_tree = BallTree(coords_radians, metric="haversine")
+
+# ── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.get("/healthz", tags=["ops"])
+@app.get("/routes/healthz", tags=["ops"])
+async def healthz():
+    return {"status": "ok"}
+
 
 @app.post("/routes/calculate", response_model=RouteResponse)
-async def find_route(req: RouteRequest):
-    query_coords = np.radians([
-        [req.orig_lat, req.orig_lon],
-        [req.dest_lat, req.dest_lon]
-    ])
-    
-    # finds the closest map nodes to the origin and destiny positions
-    _, indices = spatial_tree.query(query_coords, k=1)
-    orig_node = node_ids[indices[0][0]]
-    dest_node = node_ids[indices[1][0]]
-    
-    distance, route = nx.bidirectional_dijkstra(G, orig_node, dest_node, weight="length")
-    route = list(map(lambda x: nodes_data.loc[x][["y", "x"]].values.tolist(), route))
+async def find_route(
+    req: RouteRequest,
+    client: httpx.AsyncClient = Depends(get_client),
+):
+    # OSRM espera coordenadas no formato lon,lat (longitude primeiro)
+    coords = f"{req.orig_lon},{req.orig_lat};{req.dest_lon},{req.dest_lat}"
+
+    try:
+        r = await client.get(
+            f"/route/v1/driving/{coords}",
+            params={"overview": "full", "geometries": "geojson"},
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"OSRM backend indisponível: {exc}") from exc
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"OSRM retornou erro {r.status_code}: {r.text}")
+
+    data = r.json()
+
+    if data.get("code") != "Ok" or not data.get("routes"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sem rota entre as coordenadas fornecidas. (OSRM code: {data.get('code')})",
+        )
+
+    route = data["routes"][0]
+
+    # GeoJSON retorna [lon, lat]; convertemos para [lat, lon] para manter
+    # compatibilidade com o contrato anterior da API
+    path_nodes = [[p[1], p[0]] for p in route["geometry"]["coordinates"]]
 
     return RouteResponse(
-            distance_meters = round(distance, 2),
-            estimated_time_seconds = -1,
-            path_nodes = route
-        )
+        distance_meters=route["distance"],
+        estimated_time_seconds=route["duration"],
+        path_nodes=path_nodes,
+    )

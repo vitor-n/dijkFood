@@ -1,298 +1,32 @@
 """
 DijkFood - Simulador de Carga e Ciclo de Vida
 =================================================
-Versão Final: Combina os endpoints corretos de microsserviços com a 
-emissão cadenciada, delays realistas e métricas granulares por rota.
 
 Uso:
-  python load_simulator.py                 # cenário padrão (10 req/s)
-  SCENARIO=peak python load_simulator.py   # 50 req/s
-  SCENARIO=event python load_simulator.py  # 200 req/s
+  python simulator.py                 # cenário padrão (10 req/s)
+  SCENARIO=peak python simulator.py   # 50 req/s
+  SCENARIO=event python simulator.py  # 200 req/s
+  SCENARIO=anomaly python simulator.py # injeta entregas lentas p/ a camada preditiva
+  PLOT_METRICS=1 python simulator.py  # Plota métricas de latência
+  SIM_WORKERS=4 python simulator.py   # distribui carga em 4 processos (event loops)
+
+  BASE_URL=url SCENARIO=testing SIM_DURATION=10 PLOT_METRICS=1 python simulator.py 
 """
 
 import asyncio
+import dataclasses
+import multiprocessing
 import random
-import os
-import logging
 import time
-import statistics
 import httpx
+import logging
+from datetime import datetime
 
-from dotenv import load_dotenv
-from enum import Enum
-from dataclasses import dataclass, field
-from typing import Optional
-from utils import get_random_sp_coordinate
+from config import SimConfig, CRUD_URL, TRACKING_URL, BASE_URL
+from metrics import Metrics, metrics
+from lifecycle import run_order_lifecycle, _request
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 log = logging.getLogger("simulator")
-
-# ---------------------------------------------------------------------------
-# Configuração
-# ---------------------------------------------------------------------------
-load_dotenv()
-BASE_URL = os.getenv("BASE_URL", "")
-if BASE_URL == "":
-    CRUD_URL      = os.getenv("CRUD_URL",      "http://localhost:8000")
-    ORDER_URL     = os.getenv("ORDER_URL",     "http://localhost:8001")
-    TRACKING_URL  = os.getenv("TRACKING_URL",  "http://localhost:8002")
-    ROUTE_URL     = os.getenv("ROUTE_URL",     "http://localhost:8003")
-else:
-    CRUD_URL      = BASE_URL
-    ORDER_URL     = BASE_URL
-    TRACKING_URL  = BASE_URL
-    ROUTE_URL     = BASE_URL
-
-class OrderState(int, Enum):
-    CONFIRMED        = 1
-    PREPARING        = 2
-    READY_FOR_PICKUP = 3
-    PICKED_UP        = 4
-    IN_TRANSIT       = 5
-    DELIVERED        = 6
-
-@dataclass
-class SimConfig:
-    scenario: str = os.getenv("SCENARIO", "testing")
-    orders_per_second: float = 0.0
-    duration_seconds: int = int(os.getenv("SIM_DURATION", 10))
-    position_report_interval: float = float(os.getenv("POSITION_INTERVAL", 0.1)) # 100ms exigido
-    delay_preparing_min: float = float(os.getenv("DELAY_PREPARING_MIN", 1.0))
-    delay_preparing_max: float = float(os.getenv("DELAY_PREPARING_MAX", 3.0))
-    delay_ready_min: float = float(os.getenv("DELAY_READY_MIN", 1.0))
-    delay_ready_max: float = float(os.getenv("DELAY_READY_MAX", 5.0))
-    max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
-    max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
-
-    def __post_init__(self):
-        scenarios_mapping = {
-            "testing": 5.0,
-            "normal": 10.0,
-            "peak": 50.0,
-            "event": 200.0
-        }
-        self.orders_per_second = scenarios_mapping.get(self.scenario, self.orders_per_second)
-
-# ---------------------------------------------------------------------------
-# Métricas Granulares (Para provar isolamento)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Metrics:
-    records: list = field(default_factory=list)
-    orders_created: int = 0
-    orders_not_created: int = 0
-    orders_completed: int = 0
-    orders_failed: int = 0
-    errors: int = 0
-    max_simultaneous_orders: int = 0
-
-    def record_latency(self, endpoint: str, method: str, latency_ms: float, status: int):
-        self.records.append({
-            "endpoint": endpoint,
-            "method": method,
-            "latency_ms": latency_ms,
-            "status": status
-        })
-
-    def report(self, config: SimConfig):
-        print("=" * 80)
-        print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
-        print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
-        print(f"Pedidos não criados: {self.orders_not_created}")
-        print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
-        print(f"Erros de rede/timeout: {self.errors}")
-        print("=" * 80)
-        
-        if not self.records:
-            print("Nenhuma métrica de rede coletada.")
-            return
-            
-        by_endpoint: dict = {}
-        for r in self.records:
-            # Agrupa endpoints parametrizados para o log ficar limpo
-            ep = r["endpoint"]
-
-            if "/users?page" in ep: ep = "/users?page={X}"
-            elif "/users/" in ep: ep = "/users/{id}"
-            elif "/restaurants?page" in ep: ep = "/restaurants?page={X}"
-            elif "/restaurants/" in ep: ep = "/restaurants/{id}"
-            
-            key = f"{r['method']} {ep}"
-            by_endpoint.setdefault(key, []).append(r["latency_ms"])
-
-        print(f"{'ENDPOINT':<35s} | {'COUNT':<6s} | {'AVG':<6s} | {'P50':<6s} | {'P95 (Req: <500ms)':<17s}")
-        print("-" * 80)
-        for key, latencies in sorted(by_endpoint.items()):
-            n = len(latencies)
-            avg = sum(latencies) / n
-            if(len(latencies) >= 2):
-                quantiles = statistics.quantiles(latencies, n=100)
-                p50 = quantiles[49]
-                p95 = quantiles[94]
-            else:
-                p50 = latencies[0]
-                p95 = latencies[0]     
-            # Alerta visual se passar de 500ms
-            p95_str = f"{p95:7.1f}ms"
-            if p95 > 500: p95_str += " ⚠️"
-            
-            print(f"{key:<35s} | {n:<6d} | {avg:5.1f}ms | {p50:5.1f}ms | {p95_str}")
-        print("=" * 80)
-
-metrics = Metrics()
-
-# ---------------------------------------------------------------------------
-# Helpers HTTP & Lógica de Negócio
-# ---------------------------------------------------------------------------
-
-async def _request(
-    client: httpx.AsyncClient, method: str, base_url: str, path: str, sem: asyncio.Semaphore, config: SimConfig, **kwargs
-):
-    """Executa requisição com Retry, medindo latência exata."""
-    url = f"{base_url}{path}"
-    
-    for attempt in range(1, config.max_retries + 1):
-        async with sem:
-            t0 = time.perf_counter()
-            try:
-                resp = await client.request(method, url, **kwargs)
-                latency = (time.perf_counter() - t0) * 1000
-                metrics.record_latency(path, method, latency, resp.status_code)
-                
-                if resp.status_code in (200, 201):
-                    try: return resp.json()
-                    except: return {}
-                else:
-                    return None
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                latency = (time.perf_counter() - t0) * 1000
-                metrics.record_latency(path, method, latency, 0)
-                metrics.errors += 1
-                
-        if attempt < config.max_retries:
-            await asyncio.sleep(0.3 * (2 ** (attempt - 1)))
-    return None
-
-async def fetch_route(client, sem, config, orig_lat, orig_lon, dest_lat, dest_lon):
-    payload = {
-        "orig_lat": orig_lat, "orig_lon": orig_lon, 
-        "dest_lat": dest_lat, "dest_lon": dest_lon
-    }
-    body = await _request(client, "POST", ROUTE_URL, "/routes/calculate", sem, config, json=payload)
-    if body:
-        return body.get("path_nodes", [])
-    
-    # Fallback de interpolação
-    return [(orig_lat + (dest_lat - orig_lat) * i / 5, orig_lon + (dest_lon - orig_lon) * i / 5) for i in range(6)]
-
-# ---------------------------------------------------------------------------
-# Ciclo de Vida do Pedido
-# ---------------------------------------------------------------------------
-
-async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore, user_id: int, restaurant_id: int, config: SimConfig):
-    # 1. Criação
-    body = await _request(client, "POST", ORDER_URL, "/order", sem, config, json={"id_user": user_id, "id_restaurant": restaurant_id})
-    if not body or "id_order" not in body:
-        metrics.orders_not_created += 1
-        log.warning(f"Falha ao criar pedido para usuário {user_id} e restaurante {restaurant_id}.")
-        return
-
-    order_id = body["id_order"]
-    courier_id = body.get("id_courier")
-    metrics.orders_created += 1
-
-    # Busca coordenadas no CRUD (em paralelo)
-    u_task = _request(client, "GET", CRUD_URL, f"/users/{user_id}", sem, config)
-    r_task = _request(client, "GET", CRUD_URL, f"/restaurants/{restaurant_id}", sem, config)
-    user_data, rest_data = await asyncio.gather(u_task, r_task)
-    
-    if rest_data:
-        o_lat, o_lon = (float(rest_data["lat"]), float(rest_data["lon"]))
-    else:
-        metrics.orders_failed += 1
-        log.warning(f"Coordenadas do restaurante {restaurant_id} não encontradas para pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-    if user_data:
-        d_lat, d_lon = (float(user_data["lat"]), float(user_data["lon"]))
-    else:
-        metrics.orders_failed += 1
-        log.warning(f"Coordenadas do usuário {user_id} não encontradas para pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-    
-    # 2. Busca Rota (Entregador -> Restaurante -> Cliente)
-    waypoints = await fetch_route(client, sem, config, o_lat, o_lon, d_lat, d_lon)
-
-    if not (isinstance(waypoints, list) and len(waypoints) > 0):
-        log.warning(f"Rota falhou para pedido {order_id}. Finalizando execução sem simular rota.")
-        log.warning(waypoints)
-        return
-    
-    # 3. Transições com Delays
-    async def advance(state: OrderState):
-        result = await _request(client, "PATCH", ORDER_URL, "/order", sem, config, json={"id_order": order_id, "id_state": state.value})
-        if result and result.get('id_state', None) == state.value:
-            return True
-        else:
-            return False
-    
-    ## Estado 1 -> 2 (CONFIRMED -> PREPARING)
-    await asyncio.sleep(random.uniform(config.delay_preparing_min, config.delay_preparing_max))
-    result = await advance(OrderState.PREPARING)
-    if not result:
-        metrics.orders_failed += 1
-        log.warning(f"Falha ao avançar para PREPARING no pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-    ## Estado 2 -> 3 (PREPARING -> READY_FOR_PICKUP)
-    await asyncio.sleep(random.uniform(config.delay_ready_min, config.delay_ready_max))
-    result = await advance(OrderState.READY_FOR_PICKUP)
-    if not result:
-        metrics.orders_failed += 1
-        log.warning(f"Falha ao avançar para READY_FOR_PICKUP no pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-    ## Estado 3 -> 4 (READY_FOR_PICKUP -> PICKED_UP)
-    await asyncio.sleep(0.1)
-    result = await advance(OrderState.PICKED_UP)
-    if not result:
-        metrics.orders_failed += 1
-        log.warning(f"Falha ao avançar para PICKED_UP no pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-    # Estado 4 -> 5 (PICKED_UP -> IN_TRANSIT)
-    await asyncio.sleep(0.1)
-    result = await advance(OrderState.IN_TRANSIT)
-    if not result:
-        metrics.orders_failed += 1
-        log.warning(f"Falha ao avançar para IN_TRANSIT no pedido {order_id}. Finalizando execução sem simular rota.")
-        return
-
-    # 4. Tracking a cada 100ms (Req. Não-Funcional)
-    if courier_id:
-        # Limita o tempo da simulação de rota para aproximadamente 5s, mesmo que a rota tenha muitos pontos
-        limit_time = int(5.0 / config.position_report_interval)
-        if(len(waypoints) > limit_time): 
-            step = len(waypoints) // limit_time
-            waypoints = waypoints[::step] + [waypoints[-1]]
-        
-        for wp_lat, wp_lon in waypoints:
-            await _request(client, "POST", TRACKING_URL, "/tracking/position", sem, config, json={
-                "ID_courier": courier_id, "lat": wp_lat, "lon": wp_lon
-            })
-            await asyncio.sleep(config.position_report_interval)
-
-    # 5. Estado Final (IN_TRANSIT -> DELIVERED)
-    result = await advance(OrderState.DELIVERED)
-    if not result:
-        metrics.orders_failed += 1
-        log.warning(f"Falha ao avançar para DELIVERED no pedido {order_id}.")
-        return
-    metrics.orders_completed += 1
 
 # ---------------------------------------------------------------------------
 # Emissor e Bootstrap
@@ -301,13 +35,15 @@ async def run_order_lifecycle(client: httpx.AsyncClient, sem: asyncio.Semaphore,
 async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
     users = []
     rests = []
-    
+    rests_meta = []  # [{id, h3}] — usado pelos cenários (hotspot/concentração)
+    MAX_PAGES = 100  # Limite para evitar loops infinitos em caso de falhas no endpoint
+
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
         if u_body:
             users.extend([u["id_user"] for u in u_body.get("data", [])])
-            if u_body['has_more']:
+            if u_body.get('has_more', False):
                 page += 1
             else:
                 break
@@ -315,20 +51,149 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
             break
 
     page = 1
-    while True:
-        r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)    
+    while page <= MAX_PAGES:
+        r_body = await _request(client, "GET", CRUD_URL, f"/restaurants?page={page}&itemsPerPage=500", sem, config)
         if r_body:
-            rests.extend([r["id_restaurant"] for r in r_body.get("data", [])])
-            if r_body['has_more']:
+            for r in r_body.get("data", []):
+                rests.append(r["id_restaurant"])
+                rests_meta.append({"id": r["id_restaurant"], "h3": r.get("h3_index")})
+            if r_body.get('has_more', False):
                 page += 1
             else:
                 break
         else:
-            break                
+            break
 
-    return users, rests
+    page = 1
+    items_by_rest = {}
+    while page <= MAX_PAGES:
+        i_body = await _request(client, "GET", CRUD_URL, f"/items?page={page}&itemsPerPage=500", sem, config)
+        if i_body:
+            for i in i_body.get("data", []):
+                r_id = i["id_restaurant"]
+                if r_id not in items_by_rest:
+                    items_by_rest[r_id] = []
+                items_by_rest[r_id].append({"id_item": i["id_item"]})
+            if i_body.get('has_more', False):
+                page += 1
+            else:
+                break
+        else:
+            break
 
-async def order_emitter(client, users, restaurants, config):
+    return users, rests, rests_meta, items_by_rest
+
+
+# ---------------------------------------------------------------------------
+# Cenários operacionais parametrizáveis (A2)
+# ---------------------------------------------------------------------------
+
+def build_restaurant_population(rests_meta: list, config: SimConfig):
+    """Constrói (população, pesos) para amostragem ponderada dos restaurantes
+    conforme os knobs de cenário (hotspot por região e concentração)."""
+    ids = [m["id"] for m in rests_meta]
+    if not ids:
+        return ids, None
+
+    weights = [1.0] * len(ids)
+
+    # (a) Hotspot por região: direciona `hotspot_weight` da massa de pedidos
+    #     para os restaurantes da região alvo.
+    if config.hotspot_region and 0.0 < config.hotspot_weight < 1.0:
+        target_idx = [i for i, m in enumerate(rests_meta) if str(m.get("h3")) == str(config.hotspot_region)]
+        if target_idx:
+            others_idx = [i for i in range(len(ids)) if i not in set(target_idx)]
+            w_target = config.hotspot_weight / len(target_idx)
+            w_other = (1.0 - config.hotspot_weight) / max(1, len(others_idx))
+            for i in target_idx:
+                weights[i] = w_target
+            for i in others_idx:
+                weights[i] = w_other
+            log.info(f"[cenário] hotspot região {config.hotspot_region}: "
+                     f"{len(target_idx)} restaurantes recebendo {config.hotspot_weight:.0%} da demanda")
+        else:
+            log.warning(f"[cenário] nenhum restaurante na região {config.hotspot_region} — hotspot ignorado")
+
+    # (b) Concentração: `restaurant_concentration` da massa em `hot_restaurant_count` restaurantes.
+    elif 0.0 < config.restaurant_concentration < 1.0:
+        k = min(config.hot_restaurant_count, len(ids))
+        hot_idx = set(random.sample(range(len(ids)), k))
+        cold_idx = [i for i in range(len(ids)) if i not in hot_idx]
+        w_hot = config.restaurant_concentration / k
+        w_cold = (1.0 - config.restaurant_concentration) / max(1, len(cold_idx))
+        for i in range(len(ids)):
+            weights[i] = w_hot if i in hot_idx else w_cold
+        log.info(f"[cenário] concentração: {k} restaurantes recebendo "
+                 f"{config.restaurant_concentration:.0%} da demanda")
+
+    return ids, weights
+
+
+def build_anomaly_targets(rests_meta: list, config: SimConfig):
+    """Escolhe a região 'afligida' (entregas lentas) e o conjunto de restaurantes
+    nela. Retorna (anomaly_region, slow_restaurant_ids). Se a injeção estiver
+    desligada, retorna (None, set())."""
+    if config.slow_delivery_pct <= 0.0 or not rests_meta:
+        return None, set()
+
+    # Região alvo: explícita (ANOMALY_REGION) ou a que tem mais restaurantes
+    # (maximiza o volume e, com isso, a robustez estatística da detecção).
+    if config.anomaly_region:
+        region = config.anomaly_region
+    else:
+        by_region: dict = {}
+        for m in rests_meta:
+            h3 = m.get("h3")
+            if h3 is not None:
+                by_region.setdefault(str(h3), []).append(m["id"])
+        if not by_region:
+            log.warning("[cenário] sem regiões (h3) para injetar anomalia")
+            return None, set()
+        region = max(by_region, key=lambda r: len(by_region[r]))
+
+    slow_ids = {m["id"] for m in rests_meta if str(m.get("h3")) == str(region)}
+    log.info(f"[cenário] anomalia: região {region} com {len(slow_ids)} restaurantes — "
+             f"{config.slow_delivery_pct:.0%} dos pedidos com atraso de "
+             f"{config.slow_delivery_min_s:.0f}-{config.slow_delivery_max_s:.0f}s")
+    return region, slow_ids
+
+
+async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore, config: SimConfig):
+    """Reduz temporariamente a disponibilidade de entregadores marcando uma
+    fração deles como OFFLINE (simula indisponibilidade)."""
+    if not (0.0 < config.courier_outage_pct < 1.0):
+        return
+
+    couriers = []
+    page = 1
+    while True:
+        body = await _request(client, "GET", CRUD_URL, f"/couriers?page={page}&itemsPerPage=500", sem, config)
+        if body:
+            couriers.extend([c["id_courier"] for c in body.get("data", [])])
+            if body.get("has_more", False):
+                page += 1
+            else:
+                break
+        else:
+            break
+
+    if not couriers:
+        log.warning("[cenário] sem entregadores para aplicar outage")
+        return
+
+    n_off = int(len(couriers) * config.courier_outage_pct)
+    offline = random.sample(couriers, n_off)
+    tasks = [
+        _request(client, "PATCH", TRACKING_URL, "/tracking/status", sem, config,
+                 json={"ID_courier": cid, "status": "OFFLINE"})
+        for cid in offline
+    ]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
+             f"({config.courier_outage_pct:.0%})")
+
+
+async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None, slow_restaurant_ids=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
     end_time = time.perf_counter() + config.duration_seconds
@@ -337,15 +202,34 @@ async def order_emitter(client, users, restaurants, config):
     def _on_order_done(task: asyncio.Task):
         tasks.discard(task)
         metrics.max_simultaneous_orders = max(metrics.max_simultaneous_orders, len(tasks))
+        try:
+            task.result()
+        except Exception as e:
+            if not config.silent:
+                log.error(f"Erro não tratado na lifecycle do pedido: {e}")
+        print(f"Pedidos em andamento restantes: {len(tasks)}")
         log.info(f"Pedidos em andamento restantes: {len(tasks)}")
 
     while time.perf_counter() < end_time:
         t_start = time.perf_counter()
 
         u_id = random.choice(users)
-        r_id = random.choice(restaurants)
+        # Amostragem ponderada quando há cenário de hotspot/concentração.
+        if weights is not None:
+            r_id = random.choices(restaurants, weights=weights, k=1)[0]
+        else:
+            r_id = random.choice(restaurants)
 
-        task = asyncio.create_task(run_order_lifecycle(client, sem, u_id, r_id, config))
+        # Injeta atraso (entrega lenta) numa fração dos pedidos da região afligida.
+        inject_delay_s = 0.0
+        if slow_restaurant_ids and r_id in slow_restaurant_ids and random.random() < config.slow_delivery_pct:
+            inject_delay_s = random.uniform(config.slow_delivery_min_s, config.slow_delivery_max_s)
+
+        task = asyncio.create_task(run_order_lifecycle(
+            client, sem, u_id, r_id, config,
+            items_menu=items_by_rest.get(r_id, []) if items_by_rest else [],
+            inject_delay_s=inject_delay_s,
+        ))
         tasks.add(task)
         task.add_done_callback(_on_order_done)
 
@@ -356,25 +240,151 @@ async def order_emitter(client, users, restaurants, config):
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
         await asyncio.gather(*list(tasks), return_exceptions=True)
 
-async def main():
-    config = SimConfig()
-    print("Iniciando cénario:", config.scenario)
-    limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
+
+# ---------------------------------------------------------------------------
+# Bootstrap assíncrono — roda no processo pai, antes de forkar workers
+# ---------------------------------------------------------------------------
+
+from typing import Optional
+
+async def _bootstrap(config: SimConfig) -> Optional[dict]:
+    """Carrega IDs, constrói populações e aplica outage.
+    Retorna um dict serializável (picklable) com os dados compartilhados."""
+    sem = asyncio.Semaphore(10)
+    limits  = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-        sem_init = asyncio.Semaphore(10)
-        users, restaurants = await fetch_existing_ids(client, sem_init, config)
+        users, rests, rests_meta, items_by_rest = await fetch_existing_ids(client, sem, config)
 
-        if not users or not restaurants:
+        if not users or not rests:
             log.error("Banco vazio! Rode o populate.py antes.")
-            return
+            return None
 
-        log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
-        await order_emitter(client, users, restaurants, config)
-        
-    metrics.report(config)
+        log.info(f"Carregados {len(users)} usuários e {len(rests)} restaurantes.")
+
+        anomaly_region, slow_restaurant_ids = build_anomaly_targets(rests_meta, config)
+        if anomaly_region and not config.hotspot_region:
+            config.hotspot_region = anomaly_region
+            if config.hotspot_weight == 0.0:
+                config.hotspot_weight = 0.5
+
+        population, weights = build_restaurant_population(rests_meta, config)
+        await apply_courier_outage(client, sem, config)
+
+        return {
+            "users": users,
+            "restaurants": population or rests,
+            "items_by_rest": items_by_rest,
+            "weights": weights,
+            "slow_restaurant_ids": slow_restaurant_ids,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Worker assíncrono — roda dentro de cada processo filho
+# ---------------------------------------------------------------------------
+
+async def _worker_async(config: SimConfig, bootstrap_data: dict) -> None:
+    """Cria o client HTTP e executa o order_emitter para um único worker."""
+    limits  = httpx.Limits(max_connections=config.max_concurrent_orders + 50,
+                           max_keepalive_connections=config.max_concurrent_orders)
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+    async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
+        await order_emitter(
+            client,
+            bootstrap_data["users"],
+            bootstrap_data["restaurants"],
+            config,
+            weights=bootstrap_data["weights"],
+            items_by_rest=bootstrap_data["items_by_rest"],
+            slow_restaurant_ids=bootstrap_data["slow_restaurant_ids"],
+        )
+
+
+def _worker_run(args: tuple) -> Metrics:
+    """
+    Entry point de cada processo filho (chamado via multiprocessing.Pool.map).
+
+    Cada processo tem seu próprio event loop asyncio e suas próprias instâncias
+    de 'metrics' — sem GIL compartilhado, sem contenção de agendamento entre
+    workers. O atraso de agendamento medido dentro de cada loop reflete apenas
+    a carga daquele processo, não de todos os outros.
+
+    O singleton 'metrics' de cada processo é populado por lifecycle.py e
+    retornado via pickle para o processo pai, que agrega os resultados.
+    """
+    _worker_id, config, bootstrap_data = args
+
+    # Cada processo tem seu próprio event loop — asyncio.run() cria e destrói
+    # um event loop limpo, sem herdar estado do processo pai.
+    asyncio.run(_worker_async(config, bootstrap_data))
+
+    # 'metrics' aqui é o singleton DESTE processo (não o do pai).
+    # lifecycle.py importou e populou este mesmo objeto.
+    from metrics import metrics as local_metrics
+    return local_metrics
+
+
+# ---------------------------------------------------------------------------
+# Ponto de entrada principal
+# ---------------------------------------------------------------------------
+
+def main():
+    config    = SimConfig()
+    sim_start = time.perf_counter()
+    n_workers = config.sim_workers
+
+    if config.silent:
+        logging.getLogger("httpx").setLevel(logging.ERROR)
+
+    print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    print(f"Workers: {n_workers} processo(s) | {config.orders_per_second:.1f} req/s total "
+          f"({config.orders_per_second / n_workers:.2f} req/s por worker)")
+    print(BASE_URL)
+
+    # ── Bootstrap no processo pai (single event loop, sem concorrência de carga) ──
+    bootstrap_data = asyncio.run(_bootstrap(config))
+    if bootstrap_data is None:
+        return
+
+    # Cada worker recebe uma fatia proporcional da taxa de criação de pedidos.
+    # A taxa total é preservada: (orders_per_second/N) × N = orders_per_second.
+    worker_config = dataclasses.replace(
+        config,
+        orders_per_second=config.orders_per_second / n_workers,
+    )
+
+    if n_workers == 1:
+        # ── Caminho simples: sem overhead de multiprocessing ──────────────────
+        asyncio.run(_worker_async(worker_config, bootstrap_data))
+        total_duration = time.perf_counter() - sim_start
+        metrics.report(config, total_duration)
+        return
+
+    # ── N workers em processos separados, cada um com seu event loop ──────────
+    # 'spawn' é o método padrão no Windows e o mais seguro no Linux/macOS:
+    # garante que cada processo filho começa do zero, sem herdar estado asyncio
+    # ou descritores de arquivo do pai.
+    ctx = multiprocessing.get_context("spawn")
+    worker_args = [(i, worker_config, bootstrap_data) for i in range(n_workers)]
+
+    print(f"Iniciando {n_workers} processos worker...")
+    with ctx.Pool(n_workers) as pool:
+        results = pool.map(_worker_run, worker_args)
+
+    # ── Agregação: une as métricas de todos os processos num único relatório ──
+    combined = Metrics()
+    for m in results:
+        combined.merge(m)
+
+    total_duration = time.perf_counter() - sim_start
+    combined.report(config, total_duration)
+
 
 if __name__ == "__main__":
-    print(BASE_URL)
-    asyncio.run(main())
+    # freeze_support() é necessário para executáveis empacotados no Windows
+    # (PyInstaller, cx_Freeze etc). No-op em outras plataformas.
+    multiprocessing.freeze_support()
+    main()
