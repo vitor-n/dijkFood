@@ -101,11 +101,14 @@ class Metrics:
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
         if duration_seconds is not None:
             print(f"Tempo total desde o início até finalizar: {duration_seconds:.1f}s")
+        n_workers = getattr(config, "workers", 1) or 1
+        print(f"Workers: {n_workers} processo(s) | {config.orders_per_second / n_workers:.2f} req/s por worker")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
         print(f"Pedidos não criados: {self.orders_not_created}")
         print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
         print(f"Erros de rede/timeout: {self.errors}")
         print("=" * 80)
+
         
         if not self.records:
             print("Nenhuma métrica de rede coletada.")
