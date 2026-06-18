@@ -10,7 +10,7 @@ Comandos:
     python deploy.py plan         Apenas executa o `terraform plan` para análise da infraestrutura
     python deploy.py smoke        Faz só health checks no ALB (exige state/terraform output).
     python deploy.py populate     (EC2) Roda script para popular o BD. Suporta: users=X restaurants=Y couriers=Z
-    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W
+    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W orders_per_second=O
     python deploy.py load_test    (EC2) Executa populate seguido de simulate com valores padrão.
 
 Variáveis de ambiente:
@@ -849,7 +849,7 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
 
 
-def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None) -> None:
+def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None, orders_per_second: str | None = None) -> None:
     print("\n======== Rodando simulacao de carga no EC2 ========")
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
@@ -870,6 +870,7 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
     if duration: env_vars += f" SIM_DURATION={duration}"
     if plot: env_vars += " PLOT_METRICS=1"
     if workers: env_vars += f" SIM_WORKERS={workers}"
+    if orders_per_second: env_vars += f" SIM_ORDERS_PER_SECOND={orders_per_second}"
 
     commands = [
         "#!/bin/bash",
@@ -972,8 +973,9 @@ def main() -> None:
         scenario = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("scenario=")), None)
         duration = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("duration=")), None)
         workers = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("workers=")), None)
+        orders_per_second = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("orders_per_second=")), None)
         plot = "plot" in args_lower
-        stage_simulate(out, scenario, duration, plot, force_update, workers)
+        stage_simulate(out, scenario, duration, plot, force_update, workers, orders_per_second)
         return
 
     if action == "load_test":

@@ -7,7 +7,6 @@ cache/
 .env
 
 *.zip
-*.txt
 
 # Terraform
 .terraform/
