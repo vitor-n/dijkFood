@@ -16,7 +16,6 @@ import random
 from pathlib import Path
 from typing import Optional
 
-import geopandas as gpd
 from shapely.geometry import Point, shape
 from shapely.prepared import prep
 
@@ -24,7 +23,7 @@ log = logging.getLogger(__name__)
 
 # Caminho padrão do arquivo de dados dos distritos
 _DEFAULT_DATA_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "data", "distritos_sp.json"
+    os.path.dirname(os.path.abspath(__file__)), "sp_data", "distritos_sp.json"
 )
 
 
@@ -80,13 +79,32 @@ class GeoSampler:
     def _load_data(self):
         """Carrega os distritos do arquivo GeoJSON e pré-computa os pesos."""
         if not os.path.exists(self._data_path):
-            raise FileNotFoundError(
-                f"Arquivo de distritos não encontrado: {self._data_path}. "
-                f"Execute scripts/prepare_geodata.py para gerá-lo."
-            )
-
-        with open(self._data_path, "r", encoding="utf-8") as f:
-            geojson = json.load(f)
+            log.warning(f"Arquivo de distritos não encontrado ({self._data_path}). Usando polygon_sp.json como fallback.")
+            poly_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "polygon_sp.json")
+            if not os.path.exists(poly_path):
+                raise FileNotFoundError("Nem o distritos_sp.json nem o polygon_sp.json foram encontrados.")
+            
+            with open(poly_path, "r", encoding="utf-8") as f:
+                coords = json.load(f)
+            
+            # Constrói um GeoJSON Feature "falso" com as coordenadas
+            geojson = {
+                "features": [{
+                    "properties": {
+                        "nome": "São Paulo (Global)",
+                        "populacao": 1000,
+                        "zona": "SP",
+                        "indice_comercial": 1.0
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [coords]
+                    }
+                }]
+            }
+        else:
+            with open(self._data_path, "r", encoding="utf-8") as f:
+                geojson = json.load(f)
 
         for feature in geojson.get("features", []):
             try:

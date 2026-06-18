@@ -639,27 +639,34 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
     utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
     geo_sampler_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "geo_sampler.py")
     polygon_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "polygon_sp.json")
+    distritos_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "sp_data", "distritos_sp.json")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
 
-    with open(simulator_path, "r", encoding="utf-8") as f:
-        simulator_content = f.read()
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_content = f.read()
-    with open(metrics_path, "r", encoding="utf-8") as f:
-        metrics_content = f.read()
-    with open(lifecycle_path, "r", encoding="utf-8") as f:
-        lifecycle_content = f.read()
-    with open(main_path, "r", encoding="utf-8") as f:
-        main_content = f.read()
-    with open(utils_path, "r", encoding="utf-8") as f:
-        utils_content = f.read()
-    with open(geo_sampler_path, "r", encoding="utf-8") as f:
-        geo_sampler_content = f.read()
-    with open(polygon_path, "r", encoding="utf-8") as f:
-        polygon_content = f.read()
-    with open(req_path, "r", encoding="utf-8") as f:
-        simulator_requirements = f.read()
+    import tarfile
+    import io
+    import base64
 
+    # Compacta todos os arquivos em um .tar.gz na memória para contornar o limite de tamanho do SSM (97KB)
+    tar_stream = io.BytesIO()
+    with tarfile.open(fileobj=tar_stream, mode="w:gz") as tar:
+        for name, path in [
+            ("simulator.py", simulator_path),
+            ("config.py", config_path),
+            ("metrics.py", metrics_path),
+            ("lifecycle.py", lifecycle_path),
+            ("main.py", main_path),
+            ("utils.py", utils_path),
+            ("geo_sampler.py", geo_sampler_path),
+            ("polygon_sp.json", polygon_path),
+            ("requirements.txt", req_path)
+        ]:
+            if os.path.exists(path):
+                tar.add(path, arcname=name)
+                
+        if os.path.exists(distritos_path):
+            tar.add(distritos_path, arcname="sp_data/distritos_sp.json")
+
+    tar_b64 = base64.b64encode(tar_stream.getvalue()).decode('utf-8')
     force_str = "true" if force_update else "false"
 
     commands = [
@@ -671,33 +678,8 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "cd mock_test",
         f"if [ ! -f .env_ready ] || [ \"{force_str}\" = \"true\" ]; then",
         "echo \"Preparando ambiente...\"",
-        "cat << \"EOF_REQ\" > requirements.txt",
-        simulator_requirements,
-        "EOF_REQ",
-        "cat << \"EOF_UTILS\" > utils.py",
-        utils_content,
-        "EOF_UTILS",
-        "cat << \"EOF_MAIN\" > main.py",
-        main_content,
-        "EOF_MAIN",
-        "cat << \"EOF_CONFIG\" > config.py",
-        config_content,
-        "EOF_CONFIG",
-        "cat << \"EOF_METRICS\" > metrics.py",
-        metrics_content,
-        "EOF_METRICS",
-        "cat << \"EOF_LIFECYCLE\" > lifecycle.py",
-        lifecycle_content,
-        "EOF_LIFECYCLE",
-        "cat << \"EOF_SIM\" > simulator.py",
-        simulator_content,
-        "EOF_SIM",
-        "cat << \"EOF_GEO\" > geo_sampler.py",
-        geo_sampler_content,
-        "EOF_GEO",
-        "cat << \"EOF_POLY\" > polygon_sp.json",
-        polygon_content,
-        "EOF_POLY",
+        f"echo \"{tar_b64}\" | base64 -d > source.tar.gz",
+        "tar -xzf source.tar.gz",
         "pip3 install -r requirements.txt",
         "touch .env_ready",
         "else",
