@@ -31,6 +31,18 @@ class Metrics:
             "status": status
         })
 
+    def merge(self, other: "Metrics") -> None:
+        """Agrega métricas de outro processo filho (para uso com multiprocessing)."""
+        self.records.extend(other.records)
+        self.orders_created       += other.orders_created
+        self.orders_not_created   += other.orders_not_created
+        self.orders_completed     += other.orders_completed
+        self.orders_failed        += other.orders_failed
+        self.errors               += other.errors
+        self.max_simultaneous_orders = max(
+            self.max_simultaneous_orders, other.max_simultaneous_orders
+        )
+
     @staticmethod
     def _percentiles(latencies: list) -> dict:
         """P50/P90/P95/P99 + avg de uma lista de latências (ms)."""
@@ -83,16 +95,20 @@ class Metrics:
         except Exception as e:  # noqa: BLE001
             print(f"[metrics] falha ao gravar METRICS_JSON em {path}: {e}")
 
+
     def report(self, config: SimConfig, duration_seconds: Optional[float] = None):
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
         if duration_seconds is not None:
             print(f"Tempo total desde o início até finalizar: {duration_seconds:.1f}s")
+        n_workers = getattr(config, "workers", 1) or 1
+        print(f"Workers: {n_workers} processo(s) | {config.orders_per_second / n_workers:.2f} req/s por worker")
         print(f"Pedidos: {self.orders_created} criados | {self.orders_completed} concluídos | {self.orders_failed} falhos")
         print(f"Pedidos não criados: {self.orders_not_created}")
         print(f"Máximo de pedidos simultâneos: {self.max_simultaneous_orders}")
         print(f"Erros de rede/timeout: {self.errors}")
         print("=" * 80)
+
         
         if not self.records:
             print("Nenhuma métrica de rede coletada.")

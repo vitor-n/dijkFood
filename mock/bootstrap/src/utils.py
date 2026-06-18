@@ -31,19 +31,23 @@ def get_geo_sampler():
                 )
                 _geo_sampler = None
                 return _geo_sampler
-        except ImportError:
+        except Exception as e:
             pass
         try:
             from geo_sampler import GeoSampler
             _geo_sampler = GeoSampler()
-            logging.getLogger(__name__).info(
-                f"GeoSampler ativado: {_geo_sampler}"
-            )
-        except (FileNotFoundError, ImportError, ValueError) as e:
-            logging.getLogger(__name__).warning(
-                f"GeoSampler indisponível — usando amostragem uniforme. "
-                f"Motivo: {e}"
-            )
+            if not _geo_sampler._districts:
+                logging.getLogger(__name__).warning("GeoSampler não possui dados geográficos (fallback ou erro). Usando amostragem uniforme.")
+                _geo_sampler = None
+            else:
+                logging.getLogger(__name__).info(
+                    f"GeoSampler ativado: {_geo_sampler}\n"
+                    f"População total coberta: {_geo_sampler._total_population}"
+                )
+        except Exception as e:
+            import traceback
+            logging.getLogger(__name__).warning(f"GeoSampler indisponível — usando amostragem uniforme. Motivo: {e}")
+            logging.getLogger(__name__).debug(traceback.format_exc())
             _geo_sampler = None
     return _geo_sampler
 

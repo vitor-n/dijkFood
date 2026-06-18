@@ -8,6 +8,7 @@ Uso:
   SCENARIO=event python simulator.py  # 200 req/s
   SCENARIO=anomaly python simulator.py # injeta entregas lentas p/ a camada preditiva
   PLOT_METRICS=1 python simulator.py  # Plota métricas de latência
+  SIM_WORKERS=4 python simulator.py   # distribui carga em 4 processos (event loops)
 
   BASE_URL=url SCENARIO=testing SIM_DURATION=10 PLOT_METRICS=1 python simulator.py 
 """
@@ -22,7 +23,7 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 
 from config import SimConfig, CRUD_URL, TRACKING_URL, BASE_URL
-from metrics import metrics
+from metrics import Metrics, metrics
 from lifecycle import run_order_lifecycle, _request
 
 log = logging.getLogger("simulator")
@@ -35,8 +36,8 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
     users = []
     rests = []
     rests_meta = []  # [{id, h3}] — usado pelos cenários (hotspot/concentração)
-    MAX_PAGES = 100 # Limite para evitar loops infinitos em caso de falhas no endpoint
-    
+    MAX_PAGES = 100  # Limite para evitar loops infinitos em caso de falhas no endpoint
+
     page = 1
     while page <= MAX_PAGES:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
@@ -191,6 +192,7 @@ async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore
     log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
              f"({config.courier_outage_pct:.0%})")
 
+
 async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None, slow_restaurant_ids=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
@@ -238,6 +240,7 @@ async def order_emitter(client, users, restaurants, config, weights=None, items_
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
         await asyncio.gather(*list(tasks), return_exceptions=True)
 
+
 # ---------------------------------------------------------------------------
 # Bootstrap + Workers multiprocesso
 #
@@ -256,31 +259,29 @@ async def _bootstrap(config: SimConfig):
     entregadores — em cada worker, e garante que todos usem a MESMA amostragem)."""
     limits = httpx.Limits(max_connections=60, max_keepalive_connections=20)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+    sem = asyncio.Semaphore(10)
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-        sem_init = asyncio.Semaphore(10)
-        users, restaurants, rests_meta, items_by_rest = await fetch_existing_ids(client, sem_init, config)
+        users, rests, rests_meta, items_by_rest = await fetch_existing_ids(client, sem, config)
 
-        if not users or not restaurants:
+        if not users or not rests:
+            log.error("Banco vazio! Rode o populate.py antes.")
             return None
 
-        log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
+        log.info(f"Carregados {len(users)} usuários e {len(rests)} restaurantes.")
 
-        # Anomalia (A2): escolhe a região afligida e concentra a demanda nela
-        # (via mecanismo de hotspot) para garantir volume suficiente à detecção.
         anomaly_region, slow_restaurant_ids = build_anomaly_targets(rests_meta, config)
         if anomaly_region and not config.hotspot_region:
             config.hotspot_region = anomaly_region
             if config.hotspot_weight == 0.0:
                 config.hotspot_weight = 0.5
 
-        # Cenários operacionais (A2): população ponderada + outage de entregadores.
         population, weights = build_restaurant_population(rests_meta, config)
-        await apply_courier_outage(client, sem_init, config)
+        await apply_courier_outage(client, sem, config)
 
     return {
         "users": users,
-        "population": population or restaurants,
+        "population": population or rests,
         "weights": weights,
         "items_by_rest": items_by_rest,
         "slow_restaurant_ids": slow_restaurant_ids,
@@ -324,6 +325,10 @@ def _run_worker(args):
     ))
 
 
+# ---------------------------------------------------------------------------
+# Ponto de entrada principal
+# ---------------------------------------------------------------------------
+
 def main():
     config = SimConfig()
     sim_start = time.perf_counter()
@@ -332,6 +337,7 @@ def main():
         logging.getLogger("httpx").setLevel(logging.ERROR)
 
     print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    print(BASE_URL)
 
     # 1. Bootstrap (uma vez, no pai).
     boot = asyncio.run(_bootstrap(config))
@@ -382,5 +388,8 @@ def main():
 
 
 if __name__ == "__main__":
-    print(BASE_URL)
+    # freeze_support() é necessário para executáveis empacotados no Windows
+    # (PyInstaller, cx_Freeze etc). No-op em outras plataformas.
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

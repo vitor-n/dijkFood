@@ -10,7 +10,7 @@ Comandos:
     python deploy.py plan         Apenas executa o `terraform plan` para análise da infraestrutura
     python deploy.py smoke        Faz só health checks no ALB (exige state/terraform output).
     python deploy.py populate     (EC2) Roda script para popular o BD. Suporta: users=X restaurants=Y couriers=Z
-    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W
+    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W orders_per_second=O
     python deploy.py load_test    (EC2) Executa populate seguido de simulate com valores padrão.
 
 Variáveis de ambiente:
@@ -651,23 +651,36 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
     metrics_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "metrics.py")
     lifecycle_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "lifecycle.py")
     utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
+    geo_sampler_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "geo_sampler.py")
+    polygon_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "polygon_sp.json")
+    distritos_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "sp_data", "distritos_sp.json")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
 
-    with open(simulator_path, "r", encoding="utf-8") as f:
-        simulator_content = f.read()
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_content = f.read()
-    with open(metrics_path, "r", encoding="utf-8") as f:
-        metrics_content = f.read()
-    with open(lifecycle_path, "r", encoding="utf-8") as f:
-        lifecycle_content = f.read()
-    with open(main_path, "r", encoding="utf-8") as f:
-        main_content = f.read()
-    with open(utils_path, "r", encoding="utf-8") as f:
-        utils_content = f.read()
-    with open(req_path, "r", encoding="utf-8") as f:
-        simulator_requirements = f.read()
+    import tarfile
+    import io
+    import base64
 
+    # Compacta todos os arquivos em um .tar.gz na memória para contornar o limite de tamanho do SSM (97KB)
+    tar_stream = io.BytesIO()
+    with tarfile.open(fileobj=tar_stream, mode="w:gz") as tar:
+        for name, path in [
+            ("simulator.py", simulator_path),
+            ("config.py", config_path),
+            ("metrics.py", metrics_path),
+            ("lifecycle.py", lifecycle_path),
+            ("main.py", main_path),
+            ("utils.py", utils_path),
+            ("geo_sampler.py", geo_sampler_path),
+            ("polygon_sp.json", polygon_path),
+            ("requirements.txt", req_path)
+        ]:
+            if os.path.exists(path):
+                tar.add(path, arcname=name)
+                
+        if os.path.exists(distritos_path):
+            tar.add(distritos_path, arcname="sp_data/distritos_sp.json")
+
+    tar_b64 = base64.b64encode(tar_stream.getvalue()).decode('utf-8')
     force_str = "true" if force_update else "false"
 
     commands = [
@@ -679,27 +692,9 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "cd mock_test",
         f"if [ ! -f .env_ready ] || [ \"{force_str}\" = \"true\" ]; then",
         "echo \"Preparando ambiente...\"",
-        "cat << \"EOF_REQ\" > requirements.txt",
-        simulator_requirements,
-        "EOF_REQ",
-        "cat << \"EOF_UTILS\" > utils.py",
-        utils_content,
-        "EOF_UTILS",
-        "cat << \"EOF_MAIN\" > main.py",
-        main_content,
-        "EOF_MAIN",
-        "cat << \"EOF_CONFIG\" > config.py",
-        config_content,
-        "EOF_CONFIG",
-        "cat << \"EOF_METRICS\" > metrics.py",
-        metrics_content,
-        "EOF_METRICS",
-        "cat << \"EOF_LIFECYCLE\" > lifecycle.py",
-        lifecycle_content,
-        "EOF_LIFECYCLE",
-        "cat << \"EOF_SIM\" > simulator.py",
-        simulator_content,
-        "EOF_SIM",
+        f"echo \"{tar_b64}\" | base64 -d > source.tar.gz",
+        "tar -xzf source.tar.gz",
+        "sudo dnf reinstall -y python3-dateutil python3-botocore python3-urllib3 awscli || sudo dnf install -y python3-dateutil",
         # venv isolado: evita que o pip do simulador (matplotlib/geopandas/etc.)
         # atropele pacotes do sistema (ex.: python3-dateutil) dos quais o awscli
         # da AL2023 depende — o que quebrava o `aws s3 sync` dos plots.
@@ -708,7 +703,15 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "venv/bin/pip install -r requirements.txt --quiet",
         "touch .env_ready",
         "else",
-        "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
+        "echo \"Ambiente já preparado. Verificando integridade do venv...\"",
+        # Caso a EC2 tenha sido usada antes do merge (tinha .venv em vez de venv),
+        # o .env_ready existe mas o venv novo não. Recriar silenciosamente.
+        "if [ ! -f venv/bin/python ]; then",
+        "echo \"venv ausente ou inválido, recriando...\"",
+        "python3 -m venv venv",
+        "venv/bin/pip install --upgrade pip --quiet",
+        "venv/bin/pip install -r requirements.txt --quiet",
+        "fi",
         "fi"
     ]
 
@@ -800,7 +803,7 @@ def _run_ssm_command(ssm_client, instance_id: str, aws_region: str, commands: li
                                 print(stdout.strip())
                                 
                     if stderr:
-                        print("\n=== Erros do EC2 ===")
+                        print("\n=== Logs do EC2 ===")
                         print(stderr)
                         
                     if status != "Success":
@@ -826,7 +829,10 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
 
     _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
 
+    alb_dns = outputs.get("alb_dns_name", {}).get("value")
     env_vars = "PYTHONIOENCODING=utf-8"
+    if alb_dns:
+        env_vars += f" BASE_URL=http://{alb_dns} CRUD_URL=http://{alb_dns} ORDER_URL=http://{alb_dns} TRACKING_URL=http://{alb_dns} ROUTE_URL=http://{alb_dns}"
     if users: env_vars += f" NUM_USERS={users}"
     if restaurants: env_vars += f" NUM_RESTAURANTS={restaurants}"
     if couriers: env_vars += f" NUM_COURIERS={couriers}"
@@ -843,7 +849,7 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
 
 
-def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None) -> None:
+def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None, orders_per_second: str | None = None) -> None:
     print("\n======== Rodando simulacao de carga no EC2 ========")
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
@@ -856,11 +862,15 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
 
     _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
 
+    alb_dns = outputs.get("alb_dns_name", {}).get("value")
     env_vars = "PYTHONIOENCODING=utf-8"
+    if alb_dns:
+        env_vars += f" BASE_URL=http://{alb_dns} CRUD_URL=http://{alb_dns} ORDER_URL=http://{alb_dns} TRACKING_URL=http://{alb_dns} ROUTE_URL=http://{alb_dns}"
     if scenario: env_vars += f" SCENARIO={scenario}"
     if duration: env_vars += f" SIM_DURATION={duration}"
     if plot: env_vars += " PLOT_METRICS=1"
     if workers: env_vars += f" SIM_WORKERS={workers}"
+    if orders_per_second: env_vars += f" SIM_ORDERS_PER_SECOND={orders_per_second}"
 
     commands = [
         "#!/bin/bash",
@@ -963,8 +973,9 @@ def main() -> None:
         scenario = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("scenario=")), None)
         duration = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("duration=")), None)
         workers = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("workers=")), None)
+        orders_per_second = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("orders_per_second=")), None)
         plot = "plot" in args_lower
-        stage_simulate(out, scenario, duration, plot, force_update, workers)
+        stage_simulate(out, scenario, duration, plot, force_update, workers, orders_per_second)
         return
 
     if action == "load_test":

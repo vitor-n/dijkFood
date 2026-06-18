@@ -84,6 +84,7 @@ engine = create_async_engine(
     max_overflow=5,
     pool_pre_ping=True,
     pool_recycle=300,
+    pool_timeout=10,   # falha rápido em vez de acumular backlog por 30s (padrão)
 )
 print(settings.POSTGRES_ENDPOINT)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

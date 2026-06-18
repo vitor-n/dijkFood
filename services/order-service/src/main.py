@@ -35,6 +35,7 @@ engine = create_async_engine(
     max_overflow=5,
     pool_pre_ping=True,
     pool_recycle=300,
+    pool_timeout=10,   # falha rápido em vez de acumular backlog por 30s (padrão)
 )
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -108,13 +109,15 @@ async def create_order(
         if restaurant is None:
             raise HTTPException(status_code=404, detail="Restaurant does not exist")
 
-        # Captura as coordenadas antes de soltar a sessão. Como expire_on_commit=False,
-        # estes atributos já carregados continuam acessíveis mesmo após o close().
+        # Captura as coordenadas antes de soltar a sessão: após db.close() o objeto ORM
+        # fica detached e acessar atributos causaria DetachedInstanceError.
+        # Como expire_on_commit=False, estes atributos já carregados continuam
+        # acessíveis mesmo após o close().
         rest_lat = float(restaurant.lat)
         rest_lon = float(restaurant.lon)
 
         # Libera a conexão de volta ao pool ANTES das chamadas de rede.
-        # `commit()` NÃO devolve a conexão ao pool — a AsyncSession a mantém
+        # db.commit() NÃO devolve a conexão ao pool — a AsyncSession a mantém
         # alocada até o close(). Sem este close() a conexão ficaria retida durante
         # todo o I/O de rede ao tracking-service (nearby + tentativas de PATCH
         # status), esgotando o pool (pool_size=10 + 5 overflow) sob concorrência.
