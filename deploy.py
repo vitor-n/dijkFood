@@ -82,11 +82,25 @@ def terraform_var_file_args() -> list[str]:
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
 
-def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
-    """Só injeta -var de DB se a senha vier no ambiente (evita sobrescrever tfvars com vazio)."""
-    if not db_pass:
-        return []
-    return [f"-var=db_username={db_user}", f"-var=db_password={db_pass}"]
+def terraform_extra_var_args(db_user: str, db_pass: str | None) -> list[str]:
+    """Injeta -var para BD e Bedrock explicitamente, evitando o prefixo TF_VAR_."""
+    args = []
+    if db_pass:
+        args.extend([f"-var=db_username={db_user}", f"-var=db_password={db_pass}"])
+        
+    bedrock_ak = os.environ.get("BEDROCK_AWS_ACCESS_KEY_ID")
+    bedrock_sk = os.environ.get("BEDROCK_AWS_SECRET_ACCESS_KEY")
+    bedrock_region = os.environ.get("BEDROCK_REGION")
+    bedrock_model = os.environ.get("BEDROCK_MODEL_ID")
+    
+    if bedrock_ak: args.append(f"-var=bedrock_aws_access_key_id={bedrock_ak.strip()}")
+    if bedrock_sk: args.append(f"-var=bedrock_aws_secret_access_key={bedrock_sk.strip()}")
+    if bedrock_region: args.append(f"-var=bedrock_region={bedrock_region.strip()}")
+    if bedrock_model: args.append(f"-var=bedrock_model_id={bedrock_model.strip()}")
+    
+#    print(args)
+
+    return args
 
 
 def execute_terraform_command(args: list[str], **kw: Any) -> subprocess.CompletedProcess[Any]:
@@ -130,7 +144,7 @@ def stage_terraform_init() -> None:
 
 def stage_terraform_plan(db_user: str, db_pass: str | None) -> None:
     print("\n=== Terraform plan ===")
-    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass)]
+    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_extra_var_args(db_user, db_pass)]
     execute_terraform_command(args)
 
 
@@ -141,7 +155,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_extra_var_args(db_user, db_pass),
     ]
     execute_terraform_command(args)
 
@@ -153,7 +167,7 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_extra_var_args(db_user, db_pass),
     ]
     execute_terraform_command(args)
     print("  Recursos AWS removidos pelo terraform.")
