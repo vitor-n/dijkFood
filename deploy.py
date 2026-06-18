@@ -10,7 +10,7 @@ Comandos:
     python deploy.py plan         Apenas executa o `terraform plan` para análise da infraestrutura
     python deploy.py smoke        Faz só health checks no ALB (exige state/terraform output).
     python deploy.py populate     (EC2) Roda script para popular o BD. Suporta: users=X restaurants=Y couriers=Z
-    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot
+    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W
     python deploy.py load_test    (EC2) Executa populate seguido de simulate com valores padrão.
 
 Variáveis de ambiente:
@@ -686,7 +686,12 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "cat << \"EOF_SIM\" > simulator.py",
         simulator_content,
         "EOF_SIM",
-        "pip3 install -r requirements.txt",
+        # venv isolado: evita que o pip do simulador (matplotlib/geopandas/etc.)
+        # atropele pacotes do sistema (ex.: python3-dateutil) dos quais o awscli
+        # da AL2023 depende — o que quebrava o `aws s3 sync` dos plots.
+        "python3 -m venv venv",
+        "venv/bin/pip install --upgrade pip --quiet",
+        "venv/bin/pip install -r requirements.txt --quiet",
         "touch .env_ready",
         "else",
         "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
@@ -818,13 +823,13 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
         "cd /home/ec2-user/mock_test",
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Populate ========\"",
-        f"{env_vars} python3 -u main.py"
+        f"{env_vars} venv/bin/python -u main.py"
     ]
 
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
 
 
-def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False) -> None:
+def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None) -> None:
     print("\n======== Rodando simulacao de carga no EC2 ========")
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
@@ -841,6 +846,7 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
     if scenario: env_vars += f" SCENARIO={scenario}"
     if duration: env_vars += f" SIM_DURATION={duration}"
     if plot: env_vars += " PLOT_METRICS=1"
+    if workers: env_vars += f" SIM_WORKERS={workers}"
 
     commands = [
         "#!/bin/bash",
@@ -849,15 +855,18 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
         "mkdir -p plots",
     ]
     if plot:
-        commands.append("pip3 install matplotlib")
+        commands.append("venv/bin/pip install matplotlib --quiet")
 
     commands.extend([
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Simulacao ========\"",
-        f"{env_vars} python3 -u simulator.py"
+        f"{env_vars} venv/bin/python -u simulator.py"
     ])
 
     if plot and datalake_bucket:
+        # Conserta o awscli do sistema caso uma execução anterior (pré-venv) tenha
+        # quebrado o python3-dateutil; daqui pra frente o venv evita o problema.
+        commands.append("sudo dnf reinstall -y python3-dateutil >/dev/null 2>&1 || sudo dnf install -y python3-dateutil >/dev/null 2>&1 || true")
         commands.append(f"aws s3 sync plots/ s3://{datalake_bucket}/plots/ --region {aws_region}")
 
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-simulate", "Simulate")
@@ -939,8 +948,9 @@ def main() -> None:
         force_update = "force_update" in args_lower
         scenario = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("scenario=")), None)
         duration = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("duration=")), None)
+        workers = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("workers=")), None)
         plot = "plot" in args_lower
-        stage_simulate(out, scenario, duration, plot, force_update)
+        stage_simulate(out, scenario, duration, plot, force_update, workers)
         return
 
     if action == "load_test":
