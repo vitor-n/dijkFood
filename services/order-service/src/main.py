@@ -108,15 +108,24 @@ async def create_order(
         restaurant = (await db.execute(stmt)).scalar_one_or_none()
         if restaurant is None:
             raise HTTPException(status_code=404, detail="Restaurant does not exist")
-            
-        # Libera a conexão com o banco de volta para o pool antes de fazer chamadas de rede
-        await db.commit()
+
+        # Extrai coordenadas antes de fechar a sessão: após db.close() o objeto ORM
+        # fica detached e acessar atributos causaria DetachedInstanceError.
+        restaurant_lat = float(restaurant.lat)
+        restaurant_lon = float(restaurant.lon)
+
+        # Devolve a conexão ao pool ANTES das chamadas de rede ao tracking-service.
+        # db.commit() encerra a transação mas NÃO devolve a conexão — a AsyncSession
+        # continua segurando-a até o 'async with' fechar. db.close() a devolve agora,
+        # liberando o slot para outras requisições concorrentes durante as chamadas de rede
+        # ao tracking-service (nearby + PATCH status), que podem levar dezenas de ms cada.
+        await db.close()
 
         # 2. Busca entregador proximo
         try:
             response = await client.get(
                 urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
-                params={"lat": float(restaurant.lat), "lon": float(restaurant.lon)},
+                params={"lat": restaurant_lat, "lon": restaurant_lon},
             )
         except httpx.RequestError:
             logger.exception("Tracking service request failed while fetching nearby couriers")

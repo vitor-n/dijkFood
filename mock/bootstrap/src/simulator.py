@@ -8,11 +8,14 @@ Uso:
   SCENARIO=event python simulator.py  # 200 req/s
   SCENARIO=anomaly python simulator.py # injeta entregas lentas p/ a camada preditiva
   PLOT_METRICS=1 python simulator.py  # Plota métricas de latência
+  SIM_WORKERS=4 python simulator.py   # distribui carga em 4 processos (event loops)
 
   BASE_URL=url SCENARIO=testing SIM_DURATION=10 PLOT_METRICS=1 python simulator.py 
 """
 
 import asyncio
+import dataclasses
+import multiprocessing
 import random
 import time
 import httpx
@@ -20,7 +23,7 @@ import logging
 from datetime import datetime
 
 from config import SimConfig, CRUD_URL, TRACKING_URL, BASE_URL
-from metrics import metrics
+from metrics import Metrics, metrics
 from lifecycle import run_order_lifecycle, _request
 
 log = logging.getLogger("simulator")
@@ -33,8 +36,8 @@ async def fetch_existing_ids(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
     users = []
     rests = []
     rests_meta = []  # [{id, h3}] — usado pelos cenários (hotspot/concentração)
-    MAX_PAGES = 100 # Limite para evitar loops infinitos em caso de falhas no endpoint
-    
+    MAX_PAGES = 100  # Limite para evitar loops infinitos em caso de falhas no endpoint
+
     page = 1
     while page <= MAX_PAGES:
         u_body = await _request(client, "GET", CRUD_URL, f"/users?page={page}&itemsPerPage=500", sem, config)
@@ -189,6 +192,7 @@ async def apply_courier_outage(client: httpx.AsyncClient, sem: asyncio.Semaphore
     log.info(f"[cenário] outage: {n_off}/{len(couriers)} entregadores marcados OFFLINE "
              f"({config.courier_outage_pct:.0%})")
 
+
 async def order_emitter(client, users, restaurants, config, weights=None, items_by_rest=None, slow_restaurant_ids=None):
     sem = asyncio.Semaphore(config.max_concurrent_orders)
     interval = 1.0 / config.orders_per_second
@@ -236,46 +240,149 @@ async def order_emitter(client, users, restaurants, config, weights=None, items_
         log.info(f"Fim da emissão. Aguardando {len(tasks)} pedidos em andamento...")
         await asyncio.gather(*list(tasks), return_exceptions=True)
 
-async def main():
-    config = SimConfig()
-    sim_start = time.perf_counter()
 
-    if config.silent:
-        logging.getLogger("httpx").setLevel(logging.ERROR)
+# ---------------------------------------------------------------------------
+# Bootstrap assíncrono — roda no processo pai, antes de forkar workers
+# ---------------------------------------------------------------------------
 
-    print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-    limits = httpx.Limits(max_connections=config.max_concurrent_orders + 50, max_keepalive_connections=config.max_concurrent_orders)
+async def _bootstrap(config: SimConfig) -> dict | None:
+    """Carrega IDs, constrói populações e aplica outage.
+    Retorna um dict serializável (picklable) com os dados compartilhados."""
+    sem = asyncio.Semaphore(10)
+    limits  = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-        sem_init = asyncio.Semaphore(10)
-        users, restaurants, rests_meta, items_by_rest = await fetch_existing_ids(client, sem_init, config)
+        users, rests, rests_meta, items_by_rest = await fetch_existing_ids(client, sem, config)
 
-        if not users or not restaurants:
+        if not users or not rests:
             log.error("Banco vazio! Rode o populate.py antes.")
-            return
+            return None
 
-        log.info(f"Carregados {len(users)} usuários e {len(restaurants)} restaurantes.")
+        log.info(f"Carregados {len(users)} usuários e {len(rests)} restaurantes.")
 
-        # Anomalia (A2): escolhe a região afligida e concentra a demanda nela
-        # (via mecanismo de hotspot) para garantir volume suficiente à detecção.
         anomaly_region, slow_restaurant_ids = build_anomaly_targets(rests_meta, config)
         if anomaly_region and not config.hotspot_region:
             config.hotspot_region = anomaly_region
             if config.hotspot_weight == 0.0:
                 config.hotspot_weight = 0.5
 
-        # Cenários operacionais (A2): população ponderada + outage de entregadores.
         population, weights = build_restaurant_population(rests_meta, config)
-        await apply_courier_outage(client, sem_init, config)
+        await apply_courier_outage(client, sem, config)
 
-        await order_emitter(client, users, population or restaurants, config,
-                            weights=weights, items_by_rest=items_by_rest,
-                            slow_restaurant_ids=slow_restaurant_ids)
+        return {
+            "users": users,
+            "restaurants": population or rests,
+            "items_by_rest": items_by_rest,
+            "weights": weights,
+            "slow_restaurant_ids": slow_restaurant_ids,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Worker assíncrono — roda dentro de cada processo filho
+# ---------------------------------------------------------------------------
+
+async def _worker_async(config: SimConfig, bootstrap_data: dict) -> None:
+    """Cria o client HTTP e executa o order_emitter para um único worker."""
+    limits  = httpx.Limits(max_connections=config.max_concurrent_orders + 50,
+                           max_keepalive_connections=config.max_concurrent_orders)
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+    async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
+        await order_emitter(
+            client,
+            bootstrap_data["users"],
+            bootstrap_data["restaurants"],
+            config,
+            weights=bootstrap_data["weights"],
+            items_by_rest=bootstrap_data["items_by_rest"],
+            slow_restaurant_ids=bootstrap_data["slow_restaurant_ids"],
+        )
+
+
+def _worker_run(args: tuple) -> Metrics:
+    """
+    Entry point de cada processo filho (chamado via multiprocessing.Pool.map).
+
+    Cada processo tem seu próprio event loop asyncio e suas próprias instâncias
+    de 'metrics' — sem GIL compartilhado, sem contenção de agendamento entre
+    workers. O atraso de agendamento medido dentro de cada loop reflete apenas
+    a carga daquele processo, não de todos os outros.
+
+    O singleton 'metrics' de cada processo é populado por lifecycle.py e
+    retornado via pickle para o processo pai, que agrega os resultados.
+    """
+    _worker_id, config, bootstrap_data = args
+
+    # Cada processo tem seu próprio event loop — asyncio.run() cria e destrói
+    # um event loop limpo, sem herdar estado do processo pai.
+    asyncio.run(_worker_async(config, bootstrap_data))
+
+    # 'metrics' aqui é o singleton DESTE processo (não o do pai).
+    # lifecycle.py importou e populou este mesmo objeto.
+    from metrics import metrics as local_metrics
+    return local_metrics
+
+
+# ---------------------------------------------------------------------------
+# Ponto de entrada principal
+# ---------------------------------------------------------------------------
+
+def main():
+    config    = SimConfig()
+    sim_start = time.perf_counter()
+    n_workers = config.sim_workers
+
+    if config.silent:
+        logging.getLogger("httpx").setLevel(logging.ERROR)
+
+    print("Iniciando cenario:", config.scenario, "as", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    print(f"Workers: {n_workers} processo(s) | {config.orders_per_second:.1f} req/s total "
+          f"({config.orders_per_second / n_workers:.2f} req/s por worker)")
+    print(BASE_URL)
+
+    # ── Bootstrap no processo pai (single event loop, sem concorrência de carga) ──
+    bootstrap_data = asyncio.run(_bootstrap(config))
+    if bootstrap_data is None:
+        return
+
+    # Cada worker recebe uma fatia proporcional da taxa de criação de pedidos.
+    # A taxa total é preservada: (orders_per_second/N) × N = orders_per_second.
+    worker_config = dataclasses.replace(
+        config,
+        orders_per_second=config.orders_per_second / n_workers,
+    )
+
+    if n_workers == 1:
+        # ── Caminho simples: sem overhead de multiprocessing ──────────────────
+        asyncio.run(_worker_async(worker_config, bootstrap_data))
+        total_duration = time.perf_counter() - sim_start
+        metrics.report(config, total_duration)
+        return
+
+    # ── N workers em processos separados, cada um com seu event loop ──────────
+    # 'spawn' é o método padrão no Windows e o mais seguro no Linux/macOS:
+    # garante que cada processo filho começa do zero, sem herdar estado asyncio
+    # ou descritores de arquivo do pai.
+    ctx = multiprocessing.get_context("spawn")
+    worker_args = [(i, worker_config, bootstrap_data) for i in range(n_workers)]
+
+    print(f"Iniciando {n_workers} processos worker...")
+    with ctx.Pool(n_workers) as pool:
+        results = pool.map(_worker_run, worker_args)
+
+    # ── Agregação: une as métricas de todos os processos num único relatório ──
+    combined = Metrics()
+    for m in results:
+        combined.merge(m)
 
     total_duration = time.perf_counter() - sim_start
-    metrics.report(config, total_duration)
+    combined.report(config, total_duration)
+
 
 if __name__ == "__main__":
-    print(BASE_URL)
-    asyncio.run(main())
+    # freeze_support() é necessário para executáveis empacotados no Windows
+    # (PyInstaller, cx_Freeze etc). No-op em outras plataformas.
+    multiprocessing.freeze_support()
+    main()

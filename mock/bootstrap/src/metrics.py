@@ -29,6 +29,18 @@ class Metrics:
             "status": status
         })
 
+    def merge(self, other: "Metrics") -> None:
+        """Agrega métricas de outro processo filho (para uso com multiprocessing)."""
+        self.records.extend(other.records)
+        self.orders_created       += other.orders_created
+        self.orders_not_created   += other.orders_not_created
+        self.orders_completed     += other.orders_completed
+        self.orders_failed        += other.orders_failed
+        self.errors               += other.errors
+        self.max_simultaneous_orders = max(
+            self.max_simultaneous_orders, other.max_simultaneous_orders
+        )
+
     def report(self, config: SimConfig, duration_seconds: Optional[float] = None):
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
