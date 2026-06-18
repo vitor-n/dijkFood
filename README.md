@@ -27,7 +27,11 @@ implementação estão presentes no relatório.
 
 ## Entregáveis
 
-Relatório: abrir arquivo [`Computação em Nuvem - A1.pdf`](./Computação%20em%20Nuvem%20-%20A1.pdf)
+Relatório A1: abrir arquivo [`Computação em Nuvem - A1.pdf`](./Computação%20em%20Nuvem%20-%20A1.pdf)
+
+Relatório A2: abrir arquivo [`Computação em Nuvem - A2.pdf`](./Computação%20em%20Nuvem%20-%20A2.pdf)
+
+Vídeo de implantação e demonstração do sistema: [Google Drive](https://drive.google.com/drive/folders/1VnNJ-_aKwBaFoFUj4qqwe-s08gBdGnKt?usp=sharing)
 
 ## Instruções de execução
 
