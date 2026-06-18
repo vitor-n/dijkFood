@@ -51,7 +51,7 @@ variable "db_instance_class" {
 variable "db_multi_az" {
   description = "Enable Multi-AZ for RDS"
   type        = bool
-  default     = false # Apenas para deploys de teste. Trocar para producao.
+  default     = true # Apenas para deploys de teste. Trocar para producao.
 }
 
 # ---------- EC2 ----------
