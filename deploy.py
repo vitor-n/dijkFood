@@ -703,7 +703,15 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "venv/bin/pip install -r requirements.txt --quiet",
         "touch .env_ready",
         "else",
-        "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
+        "echo \"Ambiente já preparado. Verificando integridade do venv...\"",
+        # Caso a EC2 tenha sido usada antes do merge (tinha .venv em vez de venv),
+        # o .env_ready existe mas o venv novo não. Recriar silenciosamente.
+        "if [ ! -f venv/bin/python ]; then",
+        "echo \"venv ausente ou inválido, recriando...\"",
+        "python3 -m venv venv",
+        "venv/bin/pip install --upgrade pip --quiet",
+        "venv/bin/pip install -r requirements.txt --quiet",
+        "fi",
         "fi"
     ]
 
