@@ -680,7 +680,9 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "echo \"Preparando ambiente...\"",
         f"echo \"{tar_b64}\" | base64 -d > source.tar.gz",
         "tar -xzf source.tar.gz",
-        "pip3 install -r requirements.txt",
+        "sudo dnf reinstall -y python3-dateutil python3-botocore python3-urllib3 awscli || sudo dnf install -y python3-dateutil",
+        "python3 -m venv .venv",
+        ".venv/bin/pip install -r requirements.txt",
         "touch .env_ready",
         "else",
         "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
@@ -775,7 +777,7 @@ def _run_ssm_command(ssm_client, instance_id: str, aws_region: str, commands: li
                                 print(stdout.strip())
                                 
                     if stderr:
-                        print("\n=== Erros do EC2 ===")
+                        print("\n=== Logs do EC2 ===")
                         print(stderr)
                         
                     if status != "Success":
@@ -801,7 +803,10 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
 
     _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
 
+    alb_dns = outputs.get("alb_dns_name", {}).get("value")
     env_vars = "PYTHONIOENCODING=utf-8"
+    if alb_dns:
+        env_vars += f" BASE_URL=http://{alb_dns} CRUD_URL=http://{alb_dns} ORDER_URL=http://{alb_dns} TRACKING_URL=http://{alb_dns} ROUTE_URL=http://{alb_dns}"
     if users: env_vars += f" NUM_USERS={users}"
     if restaurants: env_vars += f" NUM_RESTAURANTS={restaurants}"
     if couriers: env_vars += f" NUM_COURIERS={couriers}"
@@ -812,7 +817,7 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
         "cd /home/ec2-user/mock_test",
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Populate ========\"",
-        f"{env_vars} python3 -u main.py"
+        f"{env_vars} /home/ec2-user/mock_test/.venv/bin/python3 -u main.py"
     ]
 
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
@@ -831,7 +836,10 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
 
     _prepare_simulation_environment(ssm_client, instance_id, aws_region, force_update)
 
+    alb_dns = outputs.get("alb_dns_name", {}).get("value")
     env_vars = "PYTHONIOENCODING=utf-8"
+    if alb_dns:
+        env_vars += f" BASE_URL=http://{alb_dns} CRUD_URL=http://{alb_dns} ORDER_URL=http://{alb_dns} TRACKING_URL=http://{alb_dns} ROUTE_URL=http://{alb_dns}"
     if scenario: env_vars += f" SCENARIO={scenario}"
     if duration: env_vars += f" SIM_DURATION={duration}"
     if plot: env_vars += " PLOT_METRICS=1"
@@ -843,12 +851,12 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
         "mkdir -p plots",
     ]
     if plot:
-        commands.append("pip3 install matplotlib")
+        commands.append("/home/ec2-user/mock_test/.venv/bin/pip install matplotlib")
 
     commands.extend([
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Simulacao ========\"",
-        f"{env_vars} python3 -u simulator.py"
+        f"{env_vars} /home/ec2-user/mock_test/.venv/bin/python3 -u simulator.py"
     ])
 
     if plot and datalake_bucket:

@@ -245,7 +245,9 @@ async def order_emitter(client, users, restaurants, config, weights=None, items_
 # Bootstrap assíncrono — roda no processo pai, antes de forkar workers
 # ---------------------------------------------------------------------------
 
-async def _bootstrap(config: SimConfig) -> dict | None:
+from typing import Optional
+
+async def _bootstrap(config: SimConfig) -> Optional[dict]:
     """Carrega IDs, constrói populações e aplica outage.
     Retorna um dict serializável (picklable) com os dados compartilhados."""
     sem = asyncio.Semaphore(10)

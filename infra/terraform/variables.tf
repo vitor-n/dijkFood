@@ -51,7 +51,7 @@ variable "db_instance_class" {
 variable "db_multi_az" {
   description = "Enable Multi-AZ for RDS"
   type        = bool
-  default     = true
+  default     = false # Apenas para deploys de teste. Trocar para producao.
 }
 
 # ---------- EC2 ----------
@@ -66,13 +66,13 @@ variable "load_tester_instance_type" {
 variable "core_api_cpu" {
   description = "CPU units for core-api task (1024 = 1 vCPU)"
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "core_api_memory" {
   description = "Memory (MiB) for core-api task"
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "core_api_desired" {
@@ -90,31 +90,31 @@ variable "core_api_min" {
 variable "core_api_max" {
   description = "Max task count for core-api auto-scaling"
   type        = number
-  default     = 5
+  default     = 6
 }
 
 variable "routing_cpu" {
   description = "CPU units for routing-service task"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "routing_memory" {
   description = "Memory (MiB) for routing-service task"
   type        = number
-  default     = 2048
+  default     = 4096
 }
 
 variable "routing_desired" {
   description = "Desired task count for routing-service"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "routing_min" {
   description = "Min task count for routing-service auto-scaling"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "routing_max" {
@@ -138,13 +138,13 @@ variable "tracking_memory" {
 variable "tracking_desired" {
   description = "Desired task count for tracking-service"
   type        = number
-  default     = 2
+  default     = 8
 }
 
 variable "tracking_min" {
   description = "Min task count for tracking-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 8
 }
 
 variable "tracking_max" {
@@ -168,50 +168,28 @@ variable "order_memory" {
 variable "order_desired" {
   description = "Desired task count for order-service"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "order_min" {
   description = "Min task count for order-service auto-scaling"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "order_max" {
   description = "Max task count for order-service auto-scaling"
   type        = number
-  default     = 10
+  default     = 12
 }
 
 # ---------- Camada analítica / Objetivo 3 ----------
 
-# Dashboard roda numa EC2 dedicada (sem ECS). As variáveis dashboard_cpu/memory/
-# desired/min/max abaixo ficam apenas por compatibilidade e não são mais usadas.
+# Dashboard roda numa EC2 dedicada.
 variable "dashboard_instance_type" {
   description = "Tipo da EC2 que hospeda o dashboard"
   type        = string
   default     = "t3.small"
-}
-
-variable "dashboard_cpu" {
-  type    = number
-  default = 1024
-}
-variable "dashboard_memory" {
-  type    = number
-  default = 2048
-}
-variable "dashboard_desired" {
-  type    = number
-  default = 1
-}
-variable "dashboard_min" {
-  type    = number
-  default = 1
-}
-variable "dashboard_max" {
-  type    = number
-  default = 3
 }
 
 variable "prediction_cpu" {
@@ -286,5 +264,5 @@ variable "ml_retrain_schedule" {
 variable "enable_ml_pipeline" {
   description = "Liga a pipeline gerenciada (Step Functions + SageMaker + EventBridge + Model Registry). Desligue para deploys de teste mais rápidos/confiáveis — o ETA continua garantido pelo prediction-service no ECS."
   type        = bool
-  default     = true
+  default     = false
 }
