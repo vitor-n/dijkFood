@@ -4,7 +4,6 @@ import logging
 from enum import Enum
 from dataclasses import dataclass
 from dotenv import load_dotenv
-import multiprocessing as _mp
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -62,9 +61,7 @@ class SimConfig:
     tracking_lifetime: float = float(os.getenv("TRACKING_LIFETIME", 5.0))
     max_concurrent_orders: int = int(os.getenv("SIM_CONCURRENCY", 1000))
     max_retries: int = int(os.getenv("SIM_MAX_RETRIES", 5))
-    # Número de processos paralelos. Cada processo tem seu próprio event loop asyncio,
-    # eliminando a saturação do event loop (único gargalo do cliente).
-    sim_workers: int = int(os.getenv("SIM_WORKERS", str(_mp.cpu_count() or 2)))
+    workers: int = int(os.getenv("SIM_WORKERS", 0))  # 0 = auto (nº de CPUs)
     silent: bool = SILENT
     plot_metrics: bool = PLOT_METRICS
 
@@ -114,3 +111,9 @@ class SimConfig:
             self.courier_outage_pct = 0.6
         if self.scenario == "anomaly" and self.slow_delivery_pct == 0.0:
             self.slow_delivery_pct = 0.35
+
+        # Nº de processos worker. Distribuir a carga entre vários event loops evita
+        # que UM único loop asyncio sature e infle a latência MEDIDA no cliente
+        # (a causa raiz da latência que cresce com o tempo de execução).
+        if self.workers <= 0:
+            self.workers = os.cpu_count() or 4

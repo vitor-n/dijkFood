@@ -1,13 +1,19 @@
 import asyncio
 import random
+import re
 import time
 import httpx
 import logging
+from urllib.parse import urlparse
 
 from config import SimConfig, OrderState, CRUD_URL, ORDER_URL, TRACKING_URL, ROUTE_URL
 from metrics import metrics
 
 log = logging.getLogger("simulator")
+
+# Compilado uma única vez (em vez de a cada requisição) para não gastar CPU do
+# event loop. Agrupa IDs numéricos: /users/123 -> /users/{id}
+_ID_PATTERN = re.compile(r'/\d+')
 
 # ---------------------------------------------------------------------------
 # Helpers HTTP & Lógica de Negócio
@@ -24,13 +30,11 @@ async def _request(
             try:
                 resp = await client.request(method, url, **kwargs)
                 latency = (time.perf_counter() - t0) * 1000
-                
-                import re
-                from urllib.parse import urlparse
+
                 # Remove query strings e agrupa IDs numéricos (ex: /items?page=1 -> /items, /users/123 -> /users/{id})
                 base_path = urlparse(path).path
-                metric_path = re.sub(r'/\d+', '/{id}', base_path)
-                
+                metric_path = _ID_PATTERN.sub('/{id}', base_path)
+
                 # Registra latência apenas de requisições concluídas
                 metrics.record_latency(metric_path, method, latency, resp.status_code)
                 

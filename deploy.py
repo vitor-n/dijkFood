@@ -10,7 +10,7 @@ Comandos:
     python deploy.py plan         Apenas executa o `terraform plan` para análise da infraestrutura
     python deploy.py smoke        Faz só health checks no ALB (exige state/terraform output).
     python deploy.py populate     (EC2) Roda script para popular o BD. Suporta: users=X restaurants=Y couriers=Z
-    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot
+    python deploy.py simulate     (EC2) Roda a simulação de requests. Suporta: scenario=S duration=D plot workers=W
     python deploy.py load_test    (EC2) Executa populate seguido de simulate com valores padrão.
 
 Variáveis de ambiente:
@@ -82,11 +82,25 @@ def terraform_var_file_args() -> list[str]:
         f"TF_VAR_FILE={raw!r} não encontrado (tente caminho relativo à raiz do repo ou a {TERRAFORM_DIR})"
     )
 
-def terraform_db_var_args(db_user: str, db_pass: str | None) -> list[str]:
-    """Só injeta -var de DB se a senha vier no ambiente (evita sobrescrever tfvars com vazio)."""
-    if not db_pass:
-        return []
-    return [f"-var=db_username={db_user}", f"-var=db_password={db_pass}"]
+def terraform_extra_var_args(db_user: str, db_pass: str | None) -> list[str]:
+    """Injeta -var para BD e Bedrock explicitamente, evitando o prefixo TF_VAR_."""
+    args = []
+    if db_pass:
+        args.extend([f"-var=db_username={db_user}", f"-var=db_password={db_pass}"])
+        
+    bedrock_ak = os.environ.get("BEDROCK_AWS_ACCESS_KEY_ID")
+    bedrock_sk = os.environ.get("BEDROCK_AWS_SECRET_ACCESS_KEY")
+    bedrock_region = os.environ.get("BEDROCK_REGION")
+    bedrock_model = os.environ.get("BEDROCK_MODEL_ID")
+    
+    if bedrock_ak: args.append(f"-var=bedrock_aws_access_key_id={bedrock_ak.strip()}")
+    if bedrock_sk: args.append(f"-var=bedrock_aws_secret_access_key={bedrock_sk.strip()}")
+    if bedrock_region: args.append(f"-var=bedrock_region={bedrock_region.strip()}")
+    if bedrock_model: args.append(f"-var=bedrock_model_id={bedrock_model.strip()}")
+    
+#    print(args)
+
+    return args
 
 
 def execute_terraform_command(args: list[str], **kw: Any) -> subprocess.CompletedProcess[Any]:
@@ -130,7 +144,7 @@ def stage_terraform_init() -> None:
 
 def stage_terraform_plan(db_user: str, db_pass: str | None) -> None:
     print("\n=== Terraform plan ===")
-    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_db_var_args(db_user, db_pass)]
+    args = ["plan", "-input=false", *terraform_var_file_args(), *terraform_extra_var_args(db_user, db_pass)]
     execute_terraform_command(args)
 
 
@@ -141,7 +155,7 @@ def stage_terraform_apply(db_user: str, db_pass: str | None) -> None:
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_extra_var_args(db_user, db_pass),
     ]
     execute_terraform_command(args)
 
@@ -153,7 +167,7 @@ def stage_terraform_destroy(db_user: str, db_pass: str | None) -> None:
         "-auto-approve",
         "-input=false",
         *terraform_var_file_args(),
-        *terraform_db_var_args(db_user, db_pass),
+        *terraform_extra_var_args(db_user, db_pass),
     ]
     execute_terraform_command(args)
     print("  Recursos AWS removidos pelo terraform.")
@@ -681,8 +695,12 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         f"echo \"{tar_b64}\" | base64 -d > source.tar.gz",
         "tar -xzf source.tar.gz",
         "sudo dnf reinstall -y python3-dateutil python3-botocore python3-urllib3 awscli || sudo dnf install -y python3-dateutil",
-        "python3 -m venv .venv",
-        ".venv/bin/pip install -r requirements.txt",
+        # venv isolado: evita que o pip do simulador (matplotlib/geopandas/etc.)
+        # atropele pacotes do sistema (ex.: python3-dateutil) dos quais o awscli
+        # da AL2023 depende — o que quebrava o `aws s3 sync` dos plots.
+        "python3 -m venv venv",
+        "venv/bin/pip install --upgrade pip --quiet",
+        "venv/bin/pip install -r requirements.txt --quiet",
         "touch .env_ready",
         "else",
         "echo \"Ambiente já preparado. Pulando etapa de upload e instalação.\"",
@@ -817,13 +835,13 @@ def stage_populate(outputs: dict[str, Any], users: str | None = None, restaurant
         "cd /home/ec2-user/mock_test",
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Populate ========\"",
-        f"{env_vars} /home/ec2-user/mock_test/.venv/bin/python3 -u main.py"
+        f"{env_vars} venv/bin/python -u main.py"
     ]
 
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-populate", "Populate")
 
 
-def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False) -> None:
+def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duration: str | None = None, plot: bool = False, force_update: bool = False, workers: str | None = None) -> None:
     print("\n======== Rodando simulacao de carga no EC2 ========")
     instance_id = outputs.get("load_tester_instance_id", {}).get("value")
     if not instance_id:
@@ -843,6 +861,7 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
     if scenario: env_vars += f" SCENARIO={scenario}"
     if duration: env_vars += f" SIM_DURATION={duration}"
     if plot: env_vars += " PLOT_METRICS=1"
+    if workers: env_vars += f" SIM_WORKERS={workers}"
 
     commands = [
         "#!/bin/bash",
@@ -851,15 +870,18 @@ def stage_simulate(outputs: dict[str, Any], scenario: str | None = None, duratio
         "mkdir -p plots",
     ]
     if plot:
-        commands.append("/home/ec2-user/mock_test/.venv/bin/pip install matplotlib")
+        commands.append("venv/bin/pip install matplotlib --quiet")
 
     commands.extend([
         "set -a; source /etc/environment; set +a",
         "echo \"========= Iniciando Simulacao ========\"",
-        f"{env_vars} /home/ec2-user/mock_test/.venv/bin/python3 -u simulator.py"
+        f"{env_vars} venv/bin/python -u simulator.py"
     ])
 
     if plot and datalake_bucket:
+        # Conserta o awscli do sistema caso uma execução anterior (pré-venv) tenha
+        # quebrado o python3-dateutil; daqui pra frente o venv evita o problema.
+        commands.append("sudo dnf reinstall -y python3-dateutil >/dev/null 2>&1 || sudo dnf install -y python3-dateutil >/dev/null 2>&1 || true")
         commands.append(f"aws s3 sync plots/ s3://{datalake_bucket}/plots/ --region {aws_region}")
 
     _run_ssm_command(ssm_client, instance_id, aws_region, commands, "/aws/ssm/dijkfood-simulate", "Simulate")
@@ -941,8 +963,9 @@ def main() -> None:
         force_update = "force_update" in args_lower
         scenario = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("scenario=")), None)
         duration = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("duration=")), None)
+        workers = next((arg.split("=")[1] for arg in sys.argv[2:] if arg.startswith("workers=")), None)
         plot = "plot" in args_lower
-        stage_simulate(out, scenario, duration, plot, force_update)
+        stage_simulate(out, scenario, duration, plot, force_update, workers)
         return
 
     if action == "load_test":

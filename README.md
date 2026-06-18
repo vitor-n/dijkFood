@@ -115,12 +115,12 @@ Se você possui uma conta AWS real com acesso ao Bedrock e quer utilizá-la em c
 
 1. **Crie um IAM User na sua conta real** com permissões para invocar modelos no Bedrock (ex: anexe a política `AmazonBedrockFullAccess`).
 2. **Gere chaves de acesso (Access Key e Secret Key)** para esse usuário.
-3. No seu terminal, exporte as credenciais da conta real como variáveis de ambiente do Terraform:
-   ```bash
-   export TF_VAR_bedrock_aws_access_key_id="SUA_ACCESS_KEY_DA_CONTA_REAL"
-   export TF_VAR_bedrock_aws_secret_access_key="SUA_SECRET_KEY_DA_CONTA_REAL"
-   export TF_VAR_bedrock_region="us-east-1"                 # Região onde o modelo está ativo
-   export TF_VAR_bedrock_model_id="amazon.nova-micro-v1:0"  # ID do modelo liberado
+3. Na raiz do projeto (mesmo local do `deploy.py`), crie um arquivo chamado `.env` e configure as credenciais da conta real (elas serão carregadas automaticamente pelo deploy):
+   ```env
+   BEDROCK_AWS_ACCESS_KEY_ID="SUA_ACCESS_KEY_DA_CONTA_REAL"
+   BEDROCK_AWS_SECRET_ACCESS_KEY="SUA_SECRET_KEY_DA_CONTA_REAL"
+   BEDROCK_REGION="us-east-1"                 # Região onde o modelo está ativo
+   BEDROCK_MODEL_ID="amazon.nova-micro-v1:0"  # ID do modelo liberado
    ```
 4. Execute o deploy (`python deploy.py update` ou `deploy`).
 

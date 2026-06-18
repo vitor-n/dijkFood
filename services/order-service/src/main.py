@@ -109,23 +109,26 @@ async def create_order(
         if restaurant is None:
             raise HTTPException(status_code=404, detail="Restaurant does not exist")
 
-        # Extrai coordenadas antes de fechar a sessão: após db.close() o objeto ORM
+        # Captura as coordenadas antes de soltar a sessão: após db.close() o objeto ORM
         # fica detached e acessar atributos causaria DetachedInstanceError.
-        restaurant_lat = float(restaurant.lat)
-        restaurant_lon = float(restaurant.lon)
+        # Como expire_on_commit=False, estes atributos já carregados continuam
+        # acessíveis mesmo após o close().
+        rest_lat = float(restaurant.lat)
+        rest_lon = float(restaurant.lon)
 
-        # Devolve a conexão ao pool ANTES das chamadas de rede ao tracking-service.
-        # db.commit() encerra a transação mas NÃO devolve a conexão — a AsyncSession
-        # continua segurando-a até o 'async with' fechar. db.close() a devolve agora,
-        # liberando o slot para outras requisições concorrentes durante as chamadas de rede
-        # ao tracking-service (nearby + PATCH status), que podem levar dezenas de ms cada.
+        # Libera a conexão de volta ao pool ANTES das chamadas de rede.
+        # db.commit() NÃO devolve a conexão ao pool — a AsyncSession a mantém
+        # alocada até o close(). Sem este close() a conexão ficaria retida durante
+        # todo o I/O de rede ao tracking-service (nearby + tentativas de PATCH
+        # status), esgotando o pool (pool_size=10 + 5 overflow) sob concorrência.
+        # As operações de persistência abaixo readquirem uma conexão do pool.
         await db.close()
 
         # 2. Busca entregador proximo
         try:
             response = await client.get(
                 urljoin(settings.TRACKING_SERVICE_ENDPOINT, "tracking/nearby"),
-                params={"lat": restaurant_lat, "lon": restaurant_lon},
+                params={"lat": rest_lat, "lon": rest_lon},
             )
         except httpx.RequestError:
             logger.exception("Tracking service request failed while fetching nearby couriers")

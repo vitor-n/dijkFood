@@ -1,3 +1,5 @@
+import os
+import json
 import time
 import statistics
 from dataclasses import dataclass, field
@@ -41,6 +43,59 @@ class Metrics:
             self.max_simultaneous_orders, other.max_simultaneous_orders
         )
 
+    @staticmethod
+    def _percentiles(latencies: list) -> dict:
+        """P50/P90/P95/P99 + avg de uma lista de latências (ms)."""
+        if not latencies:
+            return {"count": 0, "avg": None, "p50": None, "p90": None, "p95": None, "p99": None}
+        if len(latencies) == 1:
+            v = latencies[0]
+            return {"count": 1, "avg": v, "p50": v, "p90": v, "p95": v, "p99": v}
+        q = statistics.quantiles(latencies, n=100)
+        return {
+            "count": len(latencies),
+            "avg": sum(latencies) / len(latencies),
+            "p50": q[49], "p90": q[89], "p95": q[94], "p99": q[98],
+        }
+
+    def to_dict(self, config: SimConfig, duration_seconds: Optional[float] = None) -> dict:
+        """Resumo estruturado (mesmos números do relatório de texto), p/ consumo
+        por scripts de experimento sem precisar parsear stdout."""
+        all_lat = [r["latency_ms"] for r in self.records]
+        by_endpoint: dict = {}
+        for r in self.records:
+            by_endpoint.setdefault(f'{r["method"]} {r["endpoint"]}', []).append(r["latency_ms"])
+        return {
+            "scenario": config.scenario,
+            "orders_per_second": config.orders_per_second,
+            "workers": getattr(config, "workers", None),
+            "duration_seconds": duration_seconds,
+            "orders": {
+                "created": self.orders_created,
+                "completed": self.orders_completed,
+                "failed": self.orders_failed,
+                "not_created": self.orders_not_created,
+            },
+            "max_simultaneous_orders": self.max_simultaneous_orders,
+            "requests_total": len(self.records),
+            "success": sum(1 for r in self.records if r["status"] in (200, 201)),
+            "http_errors": sum(1 for r in self.records if r["status"] >= 400),
+            "net_errors": self.errors,
+            "global_latency": self._percentiles(all_lat),
+            "by_endpoint": {k: self._percentiles(v) for k, v in by_endpoint.items()},
+        }
+
+    def _maybe_dump_json(self, config: SimConfig, duration_seconds: Optional[float]) -> None:
+        path = os.getenv("METRICS_JSON")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(config, duration_seconds), f, ensure_ascii=False, indent=2)
+        except Exception as e:  # noqa: BLE001
+            print(f"[metrics] falha ao gravar METRICS_JSON em {path}: {e}")
+
+
     def report(self, config: SimConfig, duration_seconds: Optional[float] = None):
         print("=" * 80)
         print(f"RELATÓRIO DO SIMULADOR | Cenário: {config.scenario.upper()} ({config.orders_per_second} req/s)")
@@ -54,6 +109,7 @@ class Metrics:
         
         if not self.records:
             print("Nenhuma métrica de rede coletada.")
+            self._maybe_dump_json(config, duration_seconds)
             return
 
         # - Sumário global de SLA (evidência de não-regressão) -
@@ -108,6 +164,8 @@ class Metrics:
 
         if config.plot_metrics:
             self.plot_latency_over_time(by_endpoint, config)
+
+        self._maybe_dump_json(config, duration_seconds)
 
     def plot_latency_over_time(self, by_endpoint: dict, config: SimConfig):
         if not HAS_PLOT:
