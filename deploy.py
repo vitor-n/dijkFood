@@ -637,6 +637,8 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
     metrics_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "metrics.py")
     lifecycle_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "lifecycle.py")
     utils_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "utils.py")
+    geo_sampler_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "geo_sampler.py")
+    polygon_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "polygon_sp.json")
     req_path = os.path.join(PROJECT_ROOT, "mock", "bootstrap", "src", "requirements.txt")
 
     with open(simulator_path, "r", encoding="utf-8") as f:
@@ -651,6 +653,10 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         main_content = f.read()
     with open(utils_path, "r", encoding="utf-8") as f:
         utils_content = f.read()
+    with open(geo_sampler_path, "r", encoding="utf-8") as f:
+        geo_sampler_content = f.read()
+    with open(polygon_path, "r", encoding="utf-8") as f:
+        polygon_content = f.read()
     with open(req_path, "r", encoding="utf-8") as f:
         simulator_requirements = f.read()
 
@@ -686,6 +692,12 @@ def _prepare_simulation_environment(ssm_client, instance_id: str, aws_region: st
         "cat << \"EOF_SIM\" > simulator.py",
         simulator_content,
         "EOF_SIM",
+        "cat << \"EOF_GEO\" > geo_sampler.py",
+        geo_sampler_content,
+        "EOF_GEO",
+        "cat << \"EOF_POLY\" > polygon_sp.json",
+        polygon_content,
+        "EOF_POLY",
         "pip3 install -r requirements.txt",
         "touch .env_ready",
         "else",
